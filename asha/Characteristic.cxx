@@ -4,6 +4,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <sstream>
 
 #include <gio/gio.h>
 
@@ -145,7 +146,7 @@ bool Characteristic::Command(const std::vector<uint8_t>& bytes)
    return true;
 }
 
-bool Characteristic::Notify(std::function<void()> fn)
+bool Characteristic::Notify(std::function<void(const std::vector<uint8_t>&)> fn)
 {
    // No args for the dbus call.
 
@@ -166,8 +167,37 @@ bool Characteristic::Notify(std::function<void()> fn)
    {
       static void Back(GDBusProxy* self, GVariant* changed_properties, char** invalidated_properties, gpointer user_data)
       {
-         std::cout << "Characteristic g-properties-changed: " << changed_properties << '\n';
-         ((Characteristic*)user_data)->m_notify_callback();
+         std::stringstream ss;
+         ss << changed_properties;
+         auto* characteristic = (Characteristic*)user_data;
+         g_info("Property %s notified: %s", characteristic->m_uuid.c_str(), ss.str().c_str());
+         
+         if (!g_variant_check_format_string(changed_properties, "a{sv}", false))
+         {
+            g_warning("Incorrect type signature when changed property %s: %s", characteristic->m_path.c_str(), g_variant_get_type_string(changed_properties));
+            return;
+         }
+
+         GVariant* value = g_variant_lookup_value(changed_properties, "Value", G_VARIANT_TYPE_BYTESTRING);
+         if (!value)
+         {
+            // I don't think this is an error, but it isn't what we are
+            // watching for.
+            return;
+         }
+         std::shared_ptr<GVariant> pvalue(value, g_variant_unref);
+
+         if (!g_variant_check_format_string(value, "ay", false))
+         {
+            g_warning("Changed Value is not a byte array for %s: %s", characteristic->m_path.c_str(), g_variant_get_type_string(value));
+            return;
+         }
+
+         gsize length = 0;
+         const guint8* data = (const guint8*)g_variant_get_fixed_array(value, &length, sizeof(guint8));
+
+         std::vector<uint8_t> ret(data, data + length);
+         characteristic->m_notify_callback(std::vector<uint8_t>(data, data + length));
       }
    };
 

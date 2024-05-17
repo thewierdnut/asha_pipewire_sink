@@ -1,6 +1,5 @@
 #include "Bluetooth.hh"
 //#include "GVariantDump.hh"
-#include "Characteristic.hh"
 
 
 #include <iostream>

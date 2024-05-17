@@ -57,8 +57,7 @@ void Asha::SelectDevice(uint64_t id)
          g_error("Failed to connect to %s", side->Description().c_str());
          continue;
       }
-
-      side->EnableStatusNotifications();
+      side->UpdateConnectionParameters(0x10);
 
       // usleep(100000);
 
@@ -74,16 +73,9 @@ void Asha::SelectDevice(uint64_t id)
       // }
    }
 
-   // What I really want to do here is wait for the connection updates, but the
-   // kernel does not appear to expose this anywhere we can wait for the event
-   // or poll for the connection parameters.
-   // My btmon captures seem to indicate it takes sometimes 700 ms to get the
-   // LE Connection Update Complete event. Lets pause a full second here, then
-   // our caller can trigger a connection parameter status update to both
-   // sides.
-   usleep(1000000);
-   for (auto& side: m_current_device->devices)
-      side->UpdateConnectionParameters(0x10);
+   
+   // for (auto& side: m_current_device->devices)
+   //    side->UpdateConnectionParameters(0x10);
 }
 
 
@@ -104,14 +96,27 @@ void Asha::Stop()
 bool Asha::SendAudio(uint8_t* left, uint8_t* right, size_t size)
 {
    bool success = true;
+   bool ready = false;
    for (auto& side: m_current_device->devices)
    {
-      if (right && side->Right())
+      if (right && side->Right() && side->Ready())
+      {
          success = side->WriteAudioFrame(right, size, m_audio_seq) && success;
+         ready = true;
+      }
       if (left && side->Left())
+      {
          success = side->WriteAudioFrame(left, size, m_audio_seq) && success;
+         ready = true;
+      }
    }
-   ++m_audio_seq;
+   // Don't increment m_audio_seq unless we are actually sending data. We don't
+   // want the devices to be buffering waiting for packets that will never
+   // come. I'm not sure they actually do this, but meh.
+   if (ready)
+   {
+      ++m_audio_seq;
+   }
    return success;
 }
 

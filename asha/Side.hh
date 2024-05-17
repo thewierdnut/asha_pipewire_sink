@@ -50,8 +50,7 @@ public:
    bool Disconnect();
    bool Connect();
    void SetVolume(int volume);
-   bool EnableStatusNotifications();
-   bool DisableStatusNotifications();
+   // Start playback. The callback is called once the device is ready to receive.
    bool Start(bool otherstate);
    bool Stop();
    bool WriteAudioFrame(uint8_t* data, size_t size, uint8_t seq);
@@ -60,9 +59,14 @@ public:
 
    const std::string& Name() const { return m_name; }
    const std::string& Alias() const { return m_alias; }
+   bool Ready() const { return m_ready_to_receive_audio; }
 
 private:
    Side() {}
+   bool EnableStatusNotifications();
+   bool DisableStatusNotifications();
+
+   void OnStatusNotify(const std::vector<uint8_t>& data);
 
    struct
    {
@@ -83,6 +87,9 @@ private:
    int m_sock = -1;
 
    bool m_status_notify_enabled = false;
+   bool m_ready_to_receive_audio = false;
+
+   std::function<void(Status)> m_next_status_fn;
 };
 
 }

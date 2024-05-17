@@ -122,7 +122,7 @@ RawHci::~RawHci() noexcept
 }
 
 
-bool RawHci::SetPhy2M() noexcept
+bool RawHci::SendPhy2M() noexcept
 {
    struct {
       uint8_t  phy_flags = 0;
@@ -147,7 +147,7 @@ bool RawHci::SetPhy2M() noexcept
 }
 
 
-bool RawHci::SetDataLen(uint16_t size, uint16_t txtime)
+bool RawHci::SendDataLen(uint16_t size, uint16_t txtime)
 {
    struct {
       uint16_t size;
@@ -169,7 +169,7 @@ bool RawHci::SetDataLen(uint16_t size, uint16_t txtime)
    return success;
 }
 
-bool RawHci::SetConnectionParamters(uint16_t min_interval, uint16_t max_interval, uint16_t latency, uint16_t timeout, uint16_t min_ce, uint16_t max_ce)
+bool RawHci::SendConnectionUpdate(uint16_t min_interval, uint16_t max_interval, uint16_t latency, uint16_t timeout, uint16_t min_ce, uint16_t max_ce)
 {
    struct {
       uint16_t min_interval;

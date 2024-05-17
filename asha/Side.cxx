@@ -175,7 +175,7 @@ bool Side::Connect()
 
    EnableStatusNotifications();
 
-   // TODO: Issue a connection update?
+   // Issue a connection update?
    //       This is supposed to be an optional step in the bluetooth
    //       spec, and the linux kernel will only respond to connection
    //       update request issued by the peripheral, but won't
@@ -184,12 +184,12 @@ bool Side::Connect()
    //       peripheral host wait for the update complete event."
    //       I think that the hearing aids are waiting on the
    //       connection parameters before accepting audio.
-   // TODO: Android also sets the data length here.
+   // Sets the data length here?
    //          Set data length via hcitool?
    //          hcitool cmd 0x08 0x0022 0x10 0x00 0xa7 0x00 0x90 0x42
    //                      LE  SETDLEN CONNHANDL TXOCTETS  TXTIME
-   // TODO: Android sets the the PHY to LE 2M here. This is recommended, but
-   //       not required. Android won't attempt to set 24Khz G.722 without it.
+   // Sets the the PHY to LE 2M here? This is recommended, but not required.
+   // Android won't attempt to set 24Khz G.722 without it.
    //          $ hcitool con
    //          Connections:
    //              < LE 9C:9C:1D:98:BE:82 handle 16 state 1 lm CENTRAL AUTH ENCRYPT
@@ -244,11 +244,12 @@ bool Side::Connect()
    }
    // */
 
-   // This code probably requires CAP_NET_RAW
+   // This code requires CAP_NET_RAW, but it allows us to set the necessary
+   // connection parameters with an unpatched kernel. 
    RawHci raw(m_mac);
    
    // I've never gotten it to work without sending this
-   if (raw.SetConnectionParamters(16, 16, 10, 100)) // 20ms interval, 10 event buffer
+   if (raw.SendConnectionUpdate(16, 16, 10, 100)) // 20ms interval, 10 event buffer
       g_info("Set connection parameters to 20ms");
    else
       g_warning("Failed to set the connection parameters");
@@ -257,11 +258,11 @@ bool Side::Connect()
    // 161 data bytes, plus 6 byte header. Android sends 17040 microseconds as a
    // default, but at 16000 hz and two sides, we shouldn't spend more than 10ms
    // per pdu (each pdu is 320 mono samples)
-   if (raw.SetDataLen(167, 9000))
+   if (raw.SendDataLen(167, 9000))
       g_info("Set data length to 167 bytes");
    else
       g_info("Failed to set data length to 167 bytes");
-   if (raw.SetPhy2M())
+   if (raw.SendPhy2M())
       g_info("Set 2M PHY mode");
    else
       g_info("Unable to set 2M PHY mode");
@@ -284,7 +285,7 @@ void Side::SetVolume(int volume)
 bool Side::EnableStatusNotifications()
 {
    // Turn on status notifications.
-   return m_char.status.Notify([]() { g_warning("Status changed notification."); });
+   return m_char.status.Notify([this](const std::vector<uint8_t>& data) { OnStatusNotify(data); });
 }
 
 bool Side::DisableStatusNotifications()
@@ -297,12 +298,15 @@ bool Side::DisableStatusNotifications()
 bool Side::Start(bool otherstate)
 {
    static constexpr uint8_t G722_16KHZ = 1;
-
+   m_next_status_fn = [this](Status s) {
+      m_ready_to_receive_audio = s == STATUS_OK;
+   };
    return m_char.audio_control.Write({Control::START, G722_16KHZ, 0, (uint8_t)m_volume, (uint8_t)otherstate});
 }
 
 bool Side::Stop()
 {
+   m_ready_to_receive_audio = false;
    return m_char.audio_control.Write({Control::STOP});
 }
 
@@ -312,7 +316,7 @@ bool Side::WriteAudioFrame(uint8_t* data, size_t size, uint8_t seq)
 
    assert(size == 160);
    // assert(m_sock != -1);
-   if (m_sock != -1)
+   if (m_sock != -1 && m_ready_to_receive_audio)
    {
       if (size > 160)
          size = 160;
@@ -328,7 +332,7 @@ bool Side::WriteAudioFrame(uint8_t* data, size_t size, uint8_t seq)
          return true;
       else if (errno == EAGAIN)
       {
-         g_warning_once("Dropping frame for %s", Description().c_str());
+         g_warning("Dropping frame for %s", Description().c_str());
       }
       else
       {
@@ -348,4 +352,13 @@ bool Side::UpdateOtherConnected(bool connected)
 bool Side::UpdateConnectionParameters(uint8_t interval)
 {
    return m_char.audio_control.Command({Control::STATUS, Update::PARAMETERS_UPDATED, interval});
+}
+
+void Side::OnStatusNotify(const std::vector<uint8_t>& data)
+{
+   if (m_next_status_fn && !data.empty())
+   {
+      m_next_status_fn((Status)data.front());
+      m_next_status_fn = std::function<void(Status)>();
+   }
 }

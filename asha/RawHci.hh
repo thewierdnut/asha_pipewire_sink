@@ -11,9 +11,9 @@ public:
    RawHci(const std::string& mac) noexcept;
    ~RawHci() noexcept;
 
-   bool SetPhy2M() noexcept;
-   bool SetDataLen(uint16_t size, uint16_t txtime);
-   bool SetConnectionParamters(uint16_t min_interval, uint16_t max_interval, uint16_t latency, uint16_t timeout, uint16_t min_ce=0, uint16_t max_ce=0);
+   bool SendPhy2M() noexcept;
+   bool SendDataLen(uint16_t size, uint16_t txtime);
+   bool SendConnectionUpdate(uint16_t min_interval, uint16_t max_interval, uint16_t latency, uint16_t timeout, uint16_t min_ce=0, uint16_t max_ce=0);
 
 protected:
    template<typename T, typename ResponseT>

@@ -34,7 +34,7 @@ public:
    // Command the given Gatt characteristic.
    bool Command(const std::vector<uint8_t>& bytes);
    // When the given Gatt characteristic is notified, call the given function.
-   bool Notify(std::function<void()> fn);
+   bool Notify(std::function<void(const std::vector<uint8_t>&)> fn);
    void StopNotify();
 
    operator bool() const { return !m_uuid.empty(); }
@@ -51,7 +51,7 @@ private:
    std::string m_path;
 
    unsigned long m_notify_handler_id = -1;
-   std::function<void()> m_notify_callback;
+   std::function<void(const std::vector<uint8_t>&)> m_notify_callback;
 };
 
 }
