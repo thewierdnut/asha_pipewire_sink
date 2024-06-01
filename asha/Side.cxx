@@ -39,7 +39,7 @@ namespace Update
 }
 
 
-std::shared_ptr<Side> Side::CreateIfValid(const Bluetooth::Device& device)
+std::shared_ptr<Side> Side::CreateIfValid(const Bluetooth::BluezDevice& device)
 {
    // Don't return the side unless the correct asha charachteristics exist.
    std::shared_ptr<Side> side(new Side);
@@ -51,10 +51,11 @@ std::shared_ptr<Side> Side::CreateIfValid(const Bluetooth::Device& device)
       else if (c.UUID() == ASHA_VOLUME)               side->m_char.volume = c;
       else if (c.UUID() == ASHA_LE_PSM_OUT)           side->m_char.le_psm_out = c;
    }
-   // Volume is optional, but the others are required.
+   
    if (side->m_char.properties && side->m_char.audio_control &&
-       side->m_char.status && side->m_char.le_psm_out)
+       side->m_char.status && side->m_char.volume && side->m_char.le_psm_out)
    {
+      //side->m_timer.reset(g_timer_new(), g_timer_destroy);
       side->m_mac = device.mac;
       side->m_name = device.name;
       side->m_alias = device.alias;
@@ -245,40 +246,43 @@ bool Side::Connect()
    // */
 
    // This code requires CAP_NET_RAW, but it allows us to set the necessary
-   // connection parameters with an unpatched kernel. 
-   RawHci raw(m_mac);
+   // connection parameters with an unpatched kernel.
+   // RawHci raw(m_mac);
    
    // I've never gotten it to work without sending this
-   if (raw.SendConnectionUpdate(16, 16, 10, 100)) // 20ms interval, 10 event buffer
-      g_info("Set connection parameters to 20ms");
-   else
-      g_warning("Failed to set the connection parameters");
+   // if (raw.SendConnectionUpdate(16, 16, 10, 100)) // 20ms interval, 10 event buffer
+   //    g_info("Set connection parameters to 20ms");
+   // else
+   //    g_warning("Failed to set the connection parameters");
    
    // These are nice to have, but it can work without them.
    // 161 data bytes, plus 6 byte header. Android sends 17040 microseconds as a
    // default, but at 16000 hz and two sides, we shouldn't spend more than 10ms
    // per pdu (each pdu is 320 mono samples)
-   if (raw.SendDataLen(167, 9000))
-      g_info("Set data length to 167 bytes");
-   else
-      g_info("Failed to set data length to 167 bytes");
-   if (raw.SendPhy2M())
-      g_info("Set 2M PHY mode");
-   else
-      g_info("Unable to set 2M PHY mode");
+   // if (raw.SendDataLen(167, 9000))
+   //    g_info("Set data length to 167 bytes");
+   // else
+   //    g_info("Failed to set data length to 167 bytes");
+   // if (raw.SendPhy2M())
+   //    g_info("Set 2M PHY mode");
+   // else
+   //    g_info("Unable to set 2M PHY mode");
 
    return true;
 }
 
-void Side::SetVolume(int volume)
+
+void Side::SetStreamVolume(int8_t volume)
 {
    m_volume = volume;
 
-   // This characteristic is optional
-   if (m_char.volume)
-   {
-      m_char.volume.Command({(uint8_t)m_volume});
-   }
+   m_char.volume.Command({(uint8_t)m_volume});
+}
+
+
+void Side::SetDeviceVolume(int8_t volume)
+{
+   // TODO: This will probably be manufacturer specific.
 }
 
 
@@ -298,6 +302,7 @@ bool Side::DisableStatusNotifications()
 bool Side::Start(bool otherstate)
 {
    static constexpr uint8_t G722_16KHZ = 1;
+   m_ready_to_receive_audio = false;
    m_next_status_fn = [this](Status s) {
       m_ready_to_receive_audio = s == STATUS_OK;
    };
@@ -310,29 +315,29 @@ bool Side::Stop()
    return m_char.audio_control.Write({Control::STOP});
 }
 
-bool Side::WriteAudioFrame(uint8_t* data, size_t size, uint8_t seq)
+bool Side::WriteAudioFrame(const AudioPacket& packet)
 {
    // Write 20ms of data. Should be exactly 160 bytes in size.
-
-   assert(size == 160);
+   static_assert(sizeof(packet) == 161, "We can only send 161 byte audio packets");
    // assert(m_sock != -1);
    if (m_sock != -1 && m_ready_to_receive_audio)
    {
-      if (size > 160)
-         size = 160;
-      struct {
-         //uint16_t sdu_length;
-         uint8_t seq;
-         uint8_t data[160];
-      } packet;
-      // packet.sdu_length = htobs(size + 1);
-      packet.seq = seq;
-      memcpy(packet.data, data, size);
-      if (send(m_sock, &packet, size + 1, MSG_DONTWAIT) == size + 1)
+      // ++m_packet_count;
+      // double elapsed = g_timer_elapsed(m_timer.get(), nullptr);
+      // if (elapsed > 10)
+      // {
+      //    // Each packet should be 320 samples.
+      //    double rate = 320 * m_packet_count / elapsed;
+      //    g_info("Receiving data at %u hz", (unsigned)rate);
+      //    m_packet_count = 0;
+      //    g_timer_start(m_timer.get());
+      // }
+
+      if (send(m_sock, &packet, sizeof(packet), MSG_DONTWAIT) == sizeof(packet))
          return true;
       else if (errno == EAGAIN)
       {
-         g_warning("Dropping frame for %s", Description().c_str());
+         // g_warning("Dropping frame for %s", Description().c_str());
       }
       else
       {

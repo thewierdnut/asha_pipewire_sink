@@ -43,10 +43,10 @@ RawHci::RawHci(const std::string& mac) noexcept
       return;
    
    // Use raw bluetooth socket ioctls to get the info needed.
-   // First, get a list of devices.
    int sock = socket(AF_BLUETOOTH, SOCK_RAW, BTPROTO_HCI);
    if (sock < 0) return;
 
+   // Get a list of devices.
    char buffer[sizeof(hci_dev_list_req) + HCI_MAX_DEV * sizeof(hci_dev_req)] = {};
    auto dev_list = (hci_dev_list_req*)buffer;
    dev_list->dev_num = HCI_MAX_DEV;

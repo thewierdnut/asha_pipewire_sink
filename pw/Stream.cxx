@@ -66,6 +66,7 @@ Stream::Stream(
       pw_properties_new(
 	      PW_KEY_NODE_NAME, name.c_str(),
 	      PW_KEY_NODE_DESCRIPTION, alias.c_str(),
+         PW_KEY_NODE_VIRTUAL, "false",
 	      PW_KEY_MEDIA_CLASS, "Audio/Sink",
       nullptr)
    );
@@ -110,8 +111,8 @@ Stream::Stream(
       spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat, &m_info)
    };
    int flags = PW_STREAM_FLAG_AUTOCONNECT
-             | PW_STREAM_FLAG_MAP_BUFFERS;
-             // | PW_STREAM_FLAG_RT_PROCESS; // TODO: is the l2cap send() call realtime safe?
+             | PW_STREAM_FLAG_MAP_BUFFERS
+             | PW_STREAM_FLAG_RT_PROCESS; // TODO: is the l2cap send() call realtime safe?
    int res = pw_stream_connect(m_stream, SPA_DIRECTION_INPUT, PW_ID_ANY, (pw_stream_flags)flags, params, 1);
    if (res < 0)
    {
@@ -153,7 +154,7 @@ void Stream::Process()
       auto l = in->buffer->datas[0];
       auto loffs = std::min(l.chunk->offset, l.maxsize);
       auto lsize = std::min(l.chunk->size, l.maxsize - loffs);
-      auto r = in->buffer->datas[0];
+      auto r = in->buffer->datas[1];
       auto roffs = std::min(r.chunk->offset, r.maxsize);
       auto rsize = std::min(r.chunk->size, r.maxsize - roffs);
       assert(lsize == rsize);

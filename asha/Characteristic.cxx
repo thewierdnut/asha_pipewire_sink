@@ -170,7 +170,7 @@ bool Characteristic::Notify(std::function<void(const std::vector<uint8_t>&)> fn)
          std::stringstream ss;
          ss << changed_properties;
          auto* characteristic = (Characteristic*)user_data;
-         g_info("Property %s notified: %s", characteristic->m_uuid.c_str(), ss.str().c_str());
+         // g_info("Property %s notified: %s", characteristic->m_uuid.c_str(), ss.str().c_str());
          
          if (!g_variant_check_format_string(changed_properties, "a{sv}", false))
          {

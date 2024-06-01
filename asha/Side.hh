@@ -1,9 +1,12 @@
 #pragma once
 
+#include "AudioPacket.hh"
 #include "Bluetooth.hh"
 #include "Characteristic.hh"
 #include <string>
 #include <vector>
+
+struct _GTimer;
 
 namespace asha
 {
@@ -36,7 +39,7 @@ public:
    // Is this necessary? android always marks this as unknown.
    enum PlaybackType { UNKNOWN = 0, RINGTONE = 1, PHONECALL = 2, MEDIA = 3 };
 
-   static std::shared_ptr<Side> CreateIfValid(const Bluetooth::Device& device);
+   static std::shared_ptr<Side> CreateIfValid(const Bluetooth::BluezDevice& device);
 
    ~Side();
 
@@ -49,11 +52,12 @@ public:
 
    bool Disconnect();
    bool Connect();
-   void SetVolume(int volume);
+   void SetStreamVolume(int8_t volume);
+   void SetDeviceVolume(int8_t volume);
    // Start playback. The callback is called once the device is ready to receive.
    bool Start(bool otherstate);
    bool Stop();
-   bool WriteAudioFrame(uint8_t* data, size_t size, uint8_t seq);
+   bool WriteAudioFrame(const AudioPacket& packet);
    bool UpdateOtherConnected(bool connected);
    bool UpdateConnectionParameters(uint8_t interval);
 
@@ -90,6 +94,10 @@ private:
    bool m_ready_to_receive_audio = false;
 
    std::function<void(Status)> m_next_status_fn;
+
+   // TODO: remove this debugging code
+   // std::shared_ptr<struct _GTimer> m_timer;
+   // size_t m_packet_count = 0;
 };
 
 }

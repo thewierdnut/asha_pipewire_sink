@@ -83,7 +83,7 @@ typedef struct {
     int det;
 } g722_band_t;
 
-typedef struct
+typedef struct _g722_encode_state_t
 {
     /*! TRUE if the operating in the special ITU test mode, with the band split filters
              disabled. */
