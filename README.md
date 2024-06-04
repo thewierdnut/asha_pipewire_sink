@@ -109,3 +109,4 @@ If the audio is choppy, delayed, or sounds like it is shifting from ear to ear, 
 ## Feedback
 Please use the issue reporter to let me know of your experiences, positive or negative, trying to get this to work. I would love to generate a compatibility table, and perhaps to troubleshoot and add support for additional devices.
 
+Please check [the wiki](https://github.com/thewierdnut/asha_pipewire_sink/wiki) for current testing status of various devices.
