@@ -28,21 +28,6 @@ add_executable(asha_connection_test
 target_link_libraries(asha_connection_test PkgConfig::GLIB)
 
 
-# add_executable(asha_play_test
-#    asha/Asha.cxx
-#    asha/Bluetooth.cxx
-#    asha/Characteristic.cxx
-#    asha/RawHci.cxx
-#    asha/Side.cxx
-#
-#    asha/GVariantDump.cxx
-#
-#    play_test.cxx
-# )
-#
-# target_link_libraries(asha_play_test PkgConfig::GLIB)
-
-
 add_executable(asha_pipewire_sink
    asha/Asha.cxx
    asha/Bluetooth.cxx
