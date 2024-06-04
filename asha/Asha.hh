@@ -36,7 +36,7 @@ protected:
    // to respond to events we post before we process the next step, since they
    // are processed as signals on the same thread.
    void Defer(std::function<void()> fn);
-   void ProcessDeferred();
+   int ProcessDeferred();
 
 private:
    std::shared_ptr<Bluetooth> m_b;

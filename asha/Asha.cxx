@@ -9,7 +9,7 @@ using namespace asha;
 
 namespace
 {
-   static constexpr uint32_t DEFER_INTERVAL_MS = 10; // How long to delay between deferred items.
+   static constexpr uint32_t DEFER_INTERVAL_MS = 50; // How long to delay between deferred items.
 }
 
 
@@ -102,20 +102,15 @@ void Asha::Defer(std::function<void()> fn)
    m_async_queue.emplace_back(fn);
    if (m_async_queue.size() == 1)
    {
-      g_timeout_add_once(DEFER_INTERVAL_MS, [](void* user_data) {
-         ((Asha*)user_data)->ProcessDeferred();
+      g_timeout_add(DEFER_INTERVAL_MS, [](void* user_data) {
+         return ((Asha*)user_data)->ProcessDeferred();
       }, this);
    }
 }
 
-void Asha::ProcessDeferred()
+int Asha::ProcessDeferred()
 {
    m_async_queue.front()();
    m_async_queue.pop_front();
-   if (!m_async_queue.empty())
-   {
-      g_timeout_add_once(DEFER_INTERVAL_MS, [](void* user_data) {
-         ((Asha*)user_data)->ProcessDeferred();
-      }, this);
-   }
+   return m_async_queue.empty() ? G_SOURCE_REMOVE : G_SOURCE_CONTINUE;
 }
