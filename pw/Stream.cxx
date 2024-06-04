@@ -188,6 +188,7 @@ void Stream::Process()
    // }
 
 
+   // TODO: I have a SEGV here on shutdown sometimes...
    // Place the buffer back so that it can be reused.
    pw_stream_queue_buffer(m_stream, in);
 }

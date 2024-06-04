@@ -6,8 +6,10 @@
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/hci_lib.h>
+#include <bluetooth/l2cap.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <poll.h>
 
 namespace
@@ -25,14 +27,21 @@ namespace
 }
 
 
-RawHci::RawHci(const std::string& mac) noexcept
+
+// 0x04 0x0001  V1.1 	V1.2 	Read_Local_Version_Information
+// 0x04 0x0002  — 	   V1.2 	Read_Local_Supported_Commands
+// 0x04 0x0003  V1.1 	V1.2 	Read_Local_Supported_Features
+// 0x04 0x0004  — 	   V1.2 	Read_Local_ Extended_Features
+// 0x04 0x0005  V1.1 	V1.2 	Read_Buffer_Size
+// 0x04 0x0007  V1.1 	—     Read_Country_Code
+// 0x04 0x0009  V1.1 	V1.2 	Read_BD_ADDR
+
+
+RawHci::RawHci(const std::string& mac, int connection_sock) noexcept
 {
-   // TODO: Is there a better way to do this? Ideally we would map the
-   //       connection fd to the bluetooth connection id, but that info
-   //       is stored in an unaccessible kernel structure somewhere. For
-   //       now, just assume there is only one connection per device, and
-   //       use the device mac address to find it. Presumably the connection
-   //       we want is just the newest one.
+   uint16_t handle;
+   if (!HandleFromSocket(connection_sock, &handle))
+      return;
 
    // MAC address of device we are searching for.
    bdaddr_t mac_addr{};
@@ -57,7 +66,7 @@ RawHci::RawHci(const std::string& mac) noexcept
       return;
    }
 
-   for (size_t i = 0; i < dev_list->dev_num; ++i)
+   for (size_t i = 0; i < dev_list->dev_num && m_device_id == INVALID_ID; ++i)
    {
       if (hci_test_bit(HCI_UP, &(dev_list->dev_req[i].dev_opt)))
       {
@@ -78,14 +87,15 @@ RawHci::RawHci(const std::string& mac) noexcept
                // Commenting this out. Source code says 0x03, but gdb says 0x80.
                // if (conn_list->conn_info[j].type != 0x03) // LE_LINK
                //    continue;
-               if (memcmp(&conn_list->conn_info[j].bdaddr, &mac_addr, 6) == 0)
+               if (conn_list->conn_info[j].handle == handle &&
+                   memcmp(&conn_list->conn_info[j].bdaddr, &mac_addr, 6) == 0)
                {
                   // This is the device we are looking for
                   m_device_id = conn_list->dev_id;
                   m_connection_id = conn_list->conn_info[j].handle;
+                  m_connection_info = conn_list->conn_info[j];
 
-                  // Keep searching, in case we find a higher id one (which is
-                  // presumably newer).
+                  break;
                }
             }
          }
@@ -113,12 +123,35 @@ RawHci::RawHci(const std::string& mac) noexcept
    }
    
    m_sock = sock;
+
+   // TODO: is there any useful information we can get out of HCIINQUIRY ioctl?
 }
 
 RawHci::~RawHci() noexcept
 {
    if (m_sock >= 0)
       close(m_sock);
+}
+
+
+bool RawHci::ReadExtendedFeatures(uint8_t page, uint64_t* features, bool* more)
+{
+   if (!features) return false;
+   struct {
+      uint8_t status;
+      uint8_t page;
+      uint8_t max_page;
+      uint32_t features;
+   } __attribute__((packed)) response{};
+
+   if (SendCommand(OGF_INFO_PARAM, OCF_READ_LOCAL_EXT_FEATURES, page, &response) && response.status == 0)
+   {
+      if (more)
+         *more = page < response.max_page;
+      *features = response.features;
+      return true;
+   }
+   return false;
 }
 
 
@@ -207,186 +240,190 @@ bool RawHci::SendCommand(uint8_t ogf, uint16_t ocf, const T& data, ResponseT* re
    // Reading through the linux source code in source/net/bluetooth/hci_sock.c
    // it looks like it will let you create a raw socket without CAP_NET_RAW,
    // but it will return EPERM if you try to send an unapproved OGF
-   if (m_connection_id != INVALID_ID && (m_sock >= 0))
+   if (m_connection_id == INVALID_ID || (m_sock < 0))
+      return false;
+   struct {
+      uint8_t  type;
+      uint16_t opcode;
+      uint8_t  len;
+      uint16_t connection_id;
+      T data;
+   } __attribute__((packed)) msg{
+      HCI_COMMAND_PKT,
+      cmd_opcode_pack(ogf, ocf),
+      sizeof(uint16_t) + sizeof(T),
+      m_connection_id,
+      data
+   };
+
+   return SendAndWaitForResponse(msg, response, meta_sub_event);
+}
+
+
+template<typename RequestT, typename ResponseT>
+bool RawHci::SendAndWaitForResponse(const RequestT& request, ResponseT* response, uint8_t meta_sub_event) noexcept
+{
+   if (m_connection_id == INVALID_ID || (m_sock < 0))
+      return false;
+
+   std::cout << "request: ";
+   DumpHex((uint8_t*)&request, sizeof(request));
+   std::cout << '\n';
+   while (send(m_sock, &request, sizeof(request), 0) < 0)
    {
-      struct {
-         uint8_t  type;
-         uint16_t opcode;
-         uint8_t  len;
-         uint16_t connection_id;
-         T data;
-      } __attribute__((packed)) msg{
-         HCI_COMMAND_PKT,
-         cmd_opcode_pack(ogf, ocf),
-         sizeof(uint16_t) + sizeof(T),
-         m_connection_id,
-         data
-      };
-
-      std::cout << "request: ";
-      DumpHex((uint8_t*)&msg, sizeof(msg));
-      std::cout << '\n';
-      while (send(m_sock, &msg, sizeof(msg), 0) < 0)
+      if (errno != EAGAIN && errno != EINTR)
       {
-         if (errno != EAGAIN && errno != EINTR)
-         {
-            int e = errno;
-            std::cout << "Unable to send command: " << strerror(e) << '\n';
-            return false;
-         }
+         int e = errno;
+         std::cout << "Unable to send command: " << strerror(e) << '\n';
+         return false;
       }
-
-      // TODO: Wait for and check response? I don't actually want to absorb a
-      //       response that bluez wants, but hopefully a filter will handle
-      //       that.
-
-      for (int i = 0; i < 5; ++i)
+   }
+   for (int i = 0; i < 5; ++i)
+   {
+      struct pollfd events{};
+      events.fd = m_sock;
+      events.events = POLLIN;
+      if (0 == poll(&events, 1, 2000))
       {
-         struct pollfd events{};
-         events.fd = m_sock;
-         events.events = POLLIN;
-         if (0 == poll(&events, 1, 2000))
+         // timeout
+         std::cout << "Timed out waiting for response\n";
+         return false;
+      }
+      uint8_t buffer[HCI_MAX_EVENT_SIZE] = {};
+      ssize_t len = read(m_sock, buffer, sizeof(buffer));
+      if (len < 0)
+      {
+         int e = errno;
+         std::cout << "Failed to read command response: " << strerror(e) << '\n';
+         return false;
+      }
+      else if (len > 1 + sizeof(hci_event_hdr))
+      {
+         std::cout << "response: ";
+         DumpHex(buffer, len);
+         std::cout << '\n';
+         uint8_t* p = buffer;
+         p += 1;
+         len -= 1;
+         
+         auto* hdr = (hci_event_hdr*)p;
+         p += sizeof(hci_event_hdr);
+         len -= sizeof(hci_event_hdr);
+         
+         if (len >= hdr->plen)
          {
-            // timeout
-            std::cout << "Timed out waiting for response\n";
-            return false;
-         }
-         uint8_t buffer[HCI_MAX_EVENT_SIZE] = {};
-         ssize_t len = read(m_sock, buffer, sizeof(buffer));
-         if (len < 0)
-         {
-            int e = errno;
-            std::cout << "Failed to read command response: " << strerror(e) << '\n';
-            return false;
-         }
-         else if (len > 1 + sizeof(hci_event_hdr))
-         {
-            std::cout << "response: ";
-            DumpHex(buffer, len);
-            std::cout << '\n';
-            uint8_t* p = buffer;
-            p += 1;
-            len -= 1;
-            
-            auto* hdr = (hci_event_hdr*)p;
-            p += sizeof(hci_event_hdr);
-            len -= sizeof(hci_event_hdr);
-            
-            if (len >= hdr->plen)
+            // We are filtering the response types, so these are the only ones
+            // we should see.
+            switch (hdr->evt)
             {
-               // We are filtering the response types, so these are the only ones
-               // we should see.
-               switch (hdr->evt)
+            case EVT_CMD_STATUS:
+               if (len >= sizeof(evt_cmd_status))
                {
-               case EVT_CMD_STATUS:
-                  if (len >= sizeof(evt_cmd_status))
+                  auto* cs = (evt_cmd_status*)p;
+                  if (cs->opcode == request.opcode)
                   {
-                     auto* cs = (evt_cmd_status*)p;
-                     if (cs->opcode == msg.opcode)
+                     if (cs->status == 0)
                      {
-                        if (cs->status == 0)
+                        // Pending command... wait longer.
+                     }
+                     else
+                     {
+                        // Error. We won't get any further response. List of codes is here:
+                        // https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/Core-54/out/en/architecture,-mixing,-and-conventions/controller-error-codes.html
+                        std::cout << "   Error response: " << cs->status << '\n';
+                        return false;
+                     }
+                  }
+               }
+               break;
+            case EVT_CMD_COMPLETE:
+               if (len >= sizeof(evt_cmd_complete))
+               {
+                  auto* cc = (evt_cmd_complete*)p;
+                  p += sizeof(evt_cmd_complete);
+                  len -= sizeof(evt_cmd_complete);
+                  if (cc->opcode == request.opcode)
+                  {
+                     // Remaining bytes depend on the command sent.
+                     if (response)
+                     {
+                        if (len >= sizeof(ResponseT))
                         {
-                           // Pending command... wait longer.
+                           memcpy(response, p, sizeof(ResponseT));
+                           // TODO: Not every command complete event has a
+                           //       connection handle, but every response we
+                           //       expect does. This code will break if we
+                           //       try to use a command that doesn't have
+                           //       this.
+                           // if (response->handle == m_connection_id)
+                           //    return true;
+                           // else this is somebody else's response. ignore it.
                         }
                         else
                         {
-                           // Error. We won't get any further response. List of codes is here:
-                           // https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/Core-54/out/en/architecture,-mixing,-and-conventions/controller-error-codes.html
-                           std::cout << "   Error response: " << cs->status << '\n';
+                           // Not sure whether to count this as a success or
+                           // failure. We got a response, but we don't know
+                           // to read it.
                            return false;
                         }
                      }
-                  }
-                  break;
-               case EVT_CMD_COMPLETE:
-                  if (len >= sizeof(evt_cmd_complete))
-                  {
-                     auto* cc = (evt_cmd_complete*)p;
-                     p += sizeof(evt_cmd_complete);
-                     len -= sizeof(evt_cmd_complete);
-                     if (cc->opcode == msg.opcode)
-                     {
-                        // Remaining bytes depend on the command sent.
-                        if (response)
-                        {
-                           if (len >= sizeof(ResponseT))
-                           {
-                              memcpy(response, p, sizeof(ResponseT));
-                              // TODO: Not every command complete event has a
-                              //       connection handle, but every response we
-                              //       expect does. This code will break if we
-                              //       try to use a command that doesn't have
-                              //       this.
-                              if (response->handle == m_connection_id)
-                                 return true;
-                              // else this is somebody else's response. ignore it.
-                           }
-                           else
-                           {
-                              // Not sure whether to count this as a success or
-                              // failure. We got a response, but we don't know
-                              // to read it.
-                              return false;
-                           }
-                        }
-                        else
-                           return true;
-                     }
                      else
-                     {
-                        std::cout << "Whoops, we just consumed somebody else's command response.\n";
-                     }
+                        return true;
                   }
                   else
                   {
-                     std::cout << "Just read a truncated command complete. I'm confused.\n";
+                     std::cout << "Whoops, we just consumed somebody else's command response.\n";
                   }
-                  break;
-               case EVT_LE_META_EVENT:
-                  if (len >= sizeof(evt_le_meta_event))
-                  {
-                     auto* me = (evt_le_meta_event*)p;
-                     p += sizeof(evt_le_meta_event);
-                     len -= sizeof(evt_le_meta_event);
-
-                     if (meta_sub_event && me->subevent == meta_sub_event)
-                     {
-                        // Remaining bytes depend on the subevent code.
-                        if (response)
-                        {
-                           if (len >= sizeof(ResponseT))
-                           {
-                              memcpy(response, p, sizeof(ResponseT));
-                              // TODO: Not every meta event has a connection
-                              //       handle, but every response we expect
-                              //       does. This code will break if we try to
-                              //       use a command that doesn't have this.
-                              if (response->handle == m_connection_id)
-                                 return true;
-                              // else This is somebody else's response. Ignore it.
-                           }
-                           else
-                           {
-                              // Not sure whether to count this as a success or
-                              // failure. We got a response, but we don't know
-                              // to read it.
-                              return false;
-                           }
-                        }
-                        else
-                           return true;
-                     }
-                     else
-                     {
-                        std::cout << "Whoops, we just consumed somebody else's meta update.\n";
-                     }
-                  }
-                  else
-                  {
-                     std::cout << "Just read a truncated meta event. I'm confused.\n";
-                  }
-                  break;
                }
+               else
+               {
+                  std::cout << "Just read a truncated command complete. I'm confused.\n";
+               }
+               break;
+            case EVT_LE_META_EVENT:
+               if (len >= sizeof(evt_le_meta_event))
+               {
+                  auto* me = (evt_le_meta_event*)p;
+                  p += sizeof(evt_le_meta_event);
+                  len -= sizeof(evt_le_meta_event);
+
+                  if (meta_sub_event && me->subevent == meta_sub_event)
+                  {
+                     // Remaining bytes depend on the subevent code.
+                     if (response)
+                     {
+                        if (len >= sizeof(ResponseT))
+                        {
+                           memcpy(response, p, sizeof(ResponseT));
+                           // TODO: Not every meta event has a connection
+                           //       handle, but every response we expect
+                           //       does. This code will break if we try to
+                           //       use a command that doesn't have this.
+                           // if (response->handle == m_connection_id)
+                           //    return true;
+                           // else This is somebody else's response. Ignore it.
+                        }
+                        else
+                        {
+                           // Not sure whether to count this as a success or
+                           // failure. We got a response, but we don't know
+                           // to read it.
+                           return false;
+                        }
+                     }
+                     else
+                        return true;
+                  }
+                  else
+                  {
+                     std::cout << "Whoops, we just consumed somebody else's meta update.\n";
+                  }
+               }
+               else
+               {
+                  std::cout << "Just read a truncated meta event. I'm confused.\n";
+               }
+               break;
             }
          }
       }
@@ -394,4 +431,16 @@ bool RawHci::SendCommand(uint8_t ogf, uint16_t ocf, const T& data, ResponseT* re
       return true;
    }
    return false;
+}
+
+
+bool RawHci::HandleFromSocket(int sock, uint16_t* handle)
+{
+   struct l2cap_conninfo ci{};
+   socklen_t size = sizeof(ci);
+   int err = getsockopt(sock, SOL_L2CAP, L2CAP_CONNINFO, &ci, &size);
+   if (err < 0)
+      return false;
+   *handle = ci.hci_handle;
+   return true;
 }

@@ -7,6 +7,8 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <deque>
+#include <functional>
 
 
 namespace asha
@@ -26,20 +28,21 @@ public:
    Asha();
    ~Asha();
 
-   // std::vector<Device> Devices() const;
-   // bool Ready() const;
-   // void SelectDevice(uint64_t id);
-   // const Device& SelectedDevice() const;
-
-   // void Process(int timeout_ms);
-
 protected:
    void OnAddDevice(const Bluetooth::BluezDevice& d);
    void OnRemoveDevice(const std::string& path);
 
+   // Call something later. This is designed to allow the bluetooth stack time
+   // to respond to events we post before we process the next step, since they
+   // are processed as signals on the same thread.
+   void Defer(std::function<void()> fn);
+   void ProcessDeferred();
+
 private:
    std::shared_ptr<Bluetooth> m_b;
    std::map<uint64_t, std::shared_ptr<Device>> m_devices;
+
+   std::deque<std::function<void()>> m_async_queue;
 };
 
 }

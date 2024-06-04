@@ -44,6 +44,7 @@ public:
    ~Side();
 
    std::string Description() const;
+   std::string Mac() const { return m_mac; }
    Status ReadStatus();
    bool ReadProperties();
    const Properties& GetProperties() const { return m_properties; }
@@ -64,6 +65,8 @@ public:
    const std::string& Name() const { return m_name; }
    const std::string& Alias() const { return m_alias; }
    bool Ready() const { return m_ready_to_receive_audio; }
+
+   int Sock() const { return m_sock; }
 
 private:
    Side() {}

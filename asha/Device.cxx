@@ -179,11 +179,14 @@ void Device::SetDeviceVolume(bool left, int8_t v)
 // Called when a new asha bluetooth device is detected.
 void Device::AddSide(const std::string& path, const std::shared_ptr<Side>& side)
 {
+   g_info("Adding %s device to %s", side->Left() ? "left" : "right", Name().c_str());
    // Called from dbus thread, needs to hold pw lock while modifying m_sides.
    auto lock = pw::Thread::Get()->Lock();
+
    m_sides.emplace_back(path, side);
    if (m_state == CONNECTED || m_state == PAUSED || m_state == STREAMING)
    {
+      g_info("   Stream already running. Connecting new device.");
       // side->UpdateConnectionParameters(0x10);
       if (!side->Connect())
       {
@@ -202,6 +205,11 @@ void Device::AddSide(const std::string& path, const std::shared_ptr<Side>& side)
          }
          side->Start(otherstate);
       }
+      for (auto& s: m_sides)
+      {
+         if (s.second != side)
+            s.second->UpdateOtherConnected(true);
+      }
    }
 }
 
@@ -217,6 +225,9 @@ bool Device::RemoveSide(const std::string& path)
       {
          auto lock = pw::Thread::Get()->Lock();
          m_sides.erase(it);
+
+         for (auto& side: m_sides)
+            side.second->UpdateOtherConnected(false);
          return true;
       }
    }

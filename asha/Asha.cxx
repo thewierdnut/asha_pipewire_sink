@@ -7,6 +7,11 @@
 
 using namespace asha;
 
+namespace
+{
+   static constexpr uint32_t DEFER_INTERVAL_MS = 10; // How long to delay between deferred items.
+}
+
 
 Asha::Asha()
 {
@@ -52,8 +57,12 @@ void Asha::OnAddDevice(const Bluetooth::BluezDevice& d)
          )).first;
          g_info("Adding Sink %lu %s", it->first, it->second->Name().c_str());
       }
-      it->second->AddSide(d.path, side);
-
+      auto local_path = d.path;
+      auto local_side_ptr = side;
+      auto local_device = it->second;
+      Defer([=]() {
+         local_device->AddSide(local_path, local_side_ptr);
+      });
    }
 }
 
@@ -63,19 +72,50 @@ void Asha::OnRemoveDevice(const std::string& path)
    // We don't know which device has the bluetooth device, but in all
    // likelyhood, there will only be one anyways, so just check them
    // all.
-   for (auto it = m_devices.begin(); it != m_devices.end(); ++it)
-   {
-      if (it->second->RemoveSide(path))
+   // This is deferred so that we don't have race conditions during creation,
+   // since the creation is also deferred.
+   auto local_path = path;
+   Defer([=]() {
+      for (auto it = m_devices.begin(); it != m_devices.end(); ++it)
       {
-         if (it->second->SideCount() == 0)
+         if (it->second->RemoveSide(local_path))
          {
-            // Both left and right sides have disconnected, so erase the
-            // device. This will also remove it from the set of available
-            // pipewire sinks.
-            g_info("Removing Sink %lu %s", it->first, it->second->Name().c_str());
-            m_devices.erase(it);
+            if (it->second->SideCount() == 0)
+            {
+               // Both left and right sides have disconnected, so erase the
+               // device. This will also remove it from the set of available
+               // pipewire sinks.
+               g_info("Removing Sink %lu %s", it->first, it->second->Name().c_str());
+               m_devices.erase(it);
+            }
+            break;
          }
-         break;
       }
+   });
+}
+
+
+void Asha::Defer(std::function<void()> fn)
+{
+   // TODO: Its a cool idea, but this doesn't seem to be working.
+   // TODO: Lock? I think this all happens in the main thread...
+   m_async_queue.emplace_back(fn);
+   if (m_async_queue.size() == 1)
+   {
+      g_timeout_add_once(DEFER_INTERVAL_MS, [](void* user_data) {
+         ((Asha*)user_data)->ProcessDeferred();
+      }, this);
+   }
+}
+
+void Asha::ProcessDeferred()
+{
+   m_async_queue.front()();
+   m_async_queue.pop_front();
+   if (!m_async_queue.empty())
+   {
+      g_timeout_add_once(DEFER_INTERVAL_MS, [](void* user_data) {
+         ((Asha*)user_data)->ProcessDeferred();
+      }, this);
    }
 }
