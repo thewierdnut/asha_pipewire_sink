@@ -91,7 +91,7 @@ make
 
 ## Running
 ### Enable 2MPHY if your adapter and your devices support it.
-This is not mandatory, but I've only been able to reliably stream to both hearing aids with this enabled. This must be done before connecting your hearing aids. Please read [Enable 2M Phy](#enable-2m-phy) for more details, but on my box, it looks like this:
+This is not mandatory, but I've only been able to reliably stream to both hearing aids with this enabled. This must be done before connecting your hearing aids. Please read [Enable 2M Phy](#enable-2m-phy-optional) for more details, but on my box, it looks like this:
 ```
 sudo btmgt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX
 ```
