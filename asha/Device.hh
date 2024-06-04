@@ -58,6 +58,8 @@ private:
    uint8_t m_audio_seq = 0;
    int8_t m_volume = -60;
 
+   int m_skip_packets = 0; // Used to drain the packets to synchronize sides.
+
    friend class Asha;
 };
 

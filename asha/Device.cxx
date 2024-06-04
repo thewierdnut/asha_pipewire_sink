@@ -12,6 +12,7 @@ Device::Device(uint64_t hisync, const std::string& name, const std::string& alia
    m_name{name},
    m_alias{alias}
 {
+   auto lock = pw::Thread::Get()->Lock();
    m_stream = std::make_shared<pw::Stream>(
       name, alias,
       [this]() { Connect(); Start(); },
@@ -24,7 +25,9 @@ Device::Device(uint64_t hisync, const std::string& name, const std::string& alia
 
 Device::~Device()
 {
-
+   auto lock = pw::Thread::Get()->Lock();
+   m_stream.reset();
+   m_sides.clear();
 }
 
 // Called by pipewire when a node has been connected. (Since it is a stream
@@ -130,6 +133,13 @@ void Device::Stop()
 bool Device::SendAudio(AudioPacket& left, AudioPacket& right)
 {
    // Already holding pipewire thread lock.
+   if (m_skip_packets > 0)
+   {
+      // Don't send packets yet.
+      --m_skip_packets;
+      return true;
+   }
+
    bool success = false;
    if (m_state == STREAMING)
    {
@@ -182,6 +192,11 @@ void Device::AddSide(const std::string& path, const std::shared_ptr<Side>& side)
    g_info("Adding %s device to %s", side->Left() ? "left" : "right", Name().c_str());
    // Called from dbus thread, needs to hold pw lock while modifying m_sides.
    auto lock = pw::Thread::Get()->Lock();
+
+   // If we bring in a new side, when the other side already has packets
+   // queued up, then we want to drain the buffer so that it is easier for
+   // the sides to synchronize when the audio resumes
+   m_skip_packets = m_sides.empty() ? 0 : 20;
 
    m_sides.emplace_back(path, side);
    if (m_state == CONNECTED || m_state == PAUSED || m_state == STREAMING)

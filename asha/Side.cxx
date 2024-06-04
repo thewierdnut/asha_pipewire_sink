@@ -337,7 +337,7 @@ bool Side::WriteAudioFrame(const AudioPacket& packet)
          return true;
       else if (errno == EAGAIN)
       {
-         // g_warning("Dropping frame for %s", Description().c_str());
+         g_warning("Dropping frame for %s", Description().c_str());
       }
       else
       {
