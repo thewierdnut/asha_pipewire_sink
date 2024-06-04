@@ -52,16 +52,16 @@ sudo systemctl restart bluetooth
 ```
 
 ### Enable 2M PHY (optional)
-With 1M PHY (the default), I can only reliably stream audio to a single hearing aid. In order to utilize both hearing aids, I have to manually enable 2M PHY. I haven't been able to find a configuration option or a bluez interface that will do this, so I have had to resort to using btmgt commands to do this. You can check your existing enabled PHYs with `btmgmt phy`. If the `Configurable phys` contains `LE2MTX` and `LE2MRX`, but the `Selected phys` does not, then you can copy your existing `Selected phys`, and add the values `LE2MTX LE2MRX` to it. On my system, that looks like this:
+With 1M PHY (the default), I can only reliably stream audio to a single hearing aid. In order to utilize both hearing aids, I have to manually enable 2M PHY. I haven't been able to find a configuration option or a bluez interface that will do this, so I have had to resort to using btmgmt commands to do this. You can check your existing enabled PHYs with `btmgmt phy`. If the `Configurable phys` contains `LE2MTX` and `LE2MRX`, but the `Selected phys` does not, then you can copy your existing `Selected phys`, and add the values `LE2MTX LE2MRX` to it. On my system, that looks like this:
 
 ```sh
 # Check the existing phys
-$ sudo btmgt phy
+$ sudo btmgmt phy
 Supported phys: BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX LECODEDTX LECODEDRX
 Configurable phys: BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE2MTX LE2MRX LECODEDTX LECODEDRX
 Selected phys: BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX
 # copy the Selected phys, and add the new LE2MTX LE2MRX values to it
-$ sudo btmgt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX
+$ sudo btmgmt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX
 ```
 
 I haven't yet found a configuration setting that will make this setup persist through a power cycle of the bluetooth adapter. This step must be run before connecting your devices.
@@ -93,7 +93,7 @@ make
 ### Enable 2MPHY if your adapter and your devices support it.
 This is not mandatory, but I've only been able to reliably stream to both hearing aids with this enabled. This must be done before connecting your hearing aids. Please read [Enable 2M Phy](#enable-2m-phy-optional) for more details, but on my box, it looks like this:
 ```
-sudo btmgt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX
+sudo btmgmt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX
 ```
 ### Connect your hearing aids
 Connect your hearing aids using your standard bluetooth device dialog.
