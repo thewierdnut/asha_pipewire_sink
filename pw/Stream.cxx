@@ -5,7 +5,7 @@
 #include <spa/monitor/device.h>
 #include <spa/monitor/event.h>
 #include <spa/monitor/utils.h>
-#include <spa/param/audio/raw-utils.h>
+#include <spa/param/audio/format-utils.h>
 
 #include <cassert>
 #include <stdexcept>
