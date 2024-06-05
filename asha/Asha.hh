@@ -31,6 +31,7 @@ public:
 protected:
    void OnAddDevice(const Bluetooth::BluezDevice& d);
    void OnRemoveDevice(const std::string& path);
+   void OnReconnectDevice(const std::string& path);
 
    // Call something later. This is designed to allow the bluetooth stack time
    // to respond to events we post before we process the next step, since they
@@ -42,6 +43,7 @@ private:
    std::shared_ptr<Bluetooth> m_b;
    std::map<uint64_t, std::shared_ptr<Device>> m_devices;
 
+   std::mutex m_async_queue_mutex;
    std::deque<std::function<void()>> m_async_queue;
 };
 

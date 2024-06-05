@@ -30,7 +30,7 @@ public:
       ~LoopLock();
 
    private:
-      std::shared_ptr<Thread> m_thread; // So that we don't delete thre thread while a lock is held.
+      std::shared_ptr<Thread> m_thread; // So that we don't delete the thread while a lock is held.
       pw_thread_loop* m_thread_loop;
    };
    LoopLock Lock();

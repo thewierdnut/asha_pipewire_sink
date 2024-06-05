@@ -53,7 +53,8 @@ void Asha::OnAddDevice(const Bluetooth::BluezDevice& d)
          it = m_devices.emplace(props.hi_sync_id, std::make_shared<Device>(
             props.hi_sync_id,
             side->Name(),
-            side->Alias()
+            side->Alias(),
+            [this](const std::string& path) { OnReconnectDevice(path); }
          )).first;
          g_info("Adding Sink %lu %s", it->first, it->second->Name().c_str());
       }
@@ -95,10 +96,27 @@ void Asha::OnRemoveDevice(const std::string& path)
 }
 
 
+void Asha::OnReconnectDevice(const std::string& path)
+{
+   // We don't know which audio device has the bluetooth device, but in all
+   // likelyhood, there will only be one anyways, so just check them all.
+   auto local_path = path;
+   Defer([=]() {
+      for (auto it = m_devices.begin(); it != m_devices.end(); ++it)
+      {
+         // TODO: If this is the correct device, but the reconnect failed, we
+         //       should remove this device. We should probably re-add it if it
+         //       becomes available in the future, but how do we detect that?
+         if (it->second->Reconnect(local_path))
+            break;
+      }
+   });
+}
+
+
 void Asha::Defer(std::function<void()> fn)
 {
-   // TODO: Its a cool idea, but this doesn't seem to be working.
-   // TODO: Lock? I think this all happens in the main thread...
+   std::lock_guard<std::mutex> lock(m_async_queue_mutex);
    m_async_queue.emplace_back(fn);
    if (m_async_queue.size() == 1)
    {
@@ -110,6 +128,8 @@ void Asha::Defer(std::function<void()> fn)
 
 int Asha::ProcessDeferred()
 {
+   std::lock_guard<std::mutex> lock(m_async_queue_mutex);
+
    m_async_queue.front()();
    m_async_queue.pop_front();
    return m_async_queue.empty() ? G_SOURCE_REMOVE : G_SOURCE_CONTINUE;

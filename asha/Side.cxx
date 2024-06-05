@@ -1,5 +1,4 @@
 #include "Side.hh"
-#include "RawHci.hh"
 
 #include <cassert>
 #include <cstring>
@@ -128,7 +127,15 @@ bool Side::Connect()
    m_psm_id = result[0];
    if (result.size() > 1)
       m_psm_id |= result[1] << 8;
+   
+   bool ret = Reconnect();
+   EnableStatusNotifications();
+   return ret;
+}
 
+bool Side::Reconnect()
+{
+   assert(m_sock == -1);
    m_sock = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
    struct sockaddr_l2 addr{};
    addr.l2_family = AF_BLUETOOTH;
@@ -165,110 +172,24 @@ bool Side::Connect()
       return false;
    }
 
-   if (connect(m_sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+
+   int err = 0;
+   for (size_t i = 0; i < 10; ++i)
    {
-      int err = errno;
-      g_error("Failed to connect l2cap channel: %s", strerror(err));
-      close(m_sock);
-      m_sock = -1;
-      return false;
+      if (connect(m_sock, (struct sockaddr*)&addr, sizeof(addr)) == 0)
+         return true;
+      
+      err = errno;
+      if (err != EBUSY && err != EAGAIN || err != EWOULDBLOCK)
+         break;
+
+      g_usleep(1000);
    }
 
-   EnableStatusNotifications();
-
-   // Issue a connection update?
-   //       This is supposed to be an optional step in the bluetooth
-   //       spec, and the linux kernel will only respond to connection
-   //       update request issued by the peripheral, but won't
-   //       generate its own updates. Unfortunately, Step 4 in the
-   //       audio startup sequence says "Both the central and the
-   //       peripheral host wait for the update complete event."
-   //       I think that the hearing aids are waiting on the
-   //       connection parameters before accepting audio.
-   // Sets the data length here?
-   //          Set data length via hcitool?
-   //          hcitool cmd 0x08 0x0022 0x10 0x00 0xa7 0x00 0x90 0x42
-   //                      LE  SETDLEN CONNHANDL TXOCTETS  TXTIME
-   // Sets the the PHY to LE 2M here? This is recommended, but not required.
-   // Android won't attempt to set 24Khz G.722 without it.
-   //          $ hcitool con
-   //          Connections:
-   //              < LE 9C:9C:1D:98:BE:82 handle 16 state 1 lm CENTRAL AUTH ENCRYPT
-   //                                            |
-   //                                           \|/
-   //          $ sudo hcitool cmd 0x08 0x0032 0x10 0x00 0x00 0x02 0x02 0x00 0x00
-   //                             LE   SETPHY CONNHANDL ALL    TX   RX CODEDOPTS
-   //        If hcitool can do this even though the linux kernel can't, is
-   //        there a way to do this with raw stanzas somehow? Probably need
-   //        root access.
-
-   // Issue a connection update. The existing kernel code expects the
-   // peripheral to issue this, but the spec allows either side to set it, and
-   // the asha standard requires the central to set it. This code here will
-   // only work if you have the requisite bluetooth patches merged into your
-   // kernel. THIS WILL NOT WORK WITHOUT THESE PATCHES.
-   //  https://lore.kernel.org/linux-bluetooth/20170413122203.4247-1-eu@felipetonello.com/
-   /*
-   static constexpr int BT_LE_CONN_PARAM = 30;
-   struct bt_le_conn_param {
-      uint16_t min_interval;
-      uint16_t max_interval;
-      uint16_t latency;
-      uint16_t supervision_timeout;
-   } params;
-   socklen_t param_len = sizeof(params);
-   if (0 == getsockopt(m_sock, SOL_BLUETOOTH, BT_LE_CONN_PARAM, &params, &param_len))
-   {
-      g_info("Retrieved connection parameters: \n"
-             "  min:     %hu\n"
-             "  max:     %hu\n"
-             "  latency: %hu\n"
-             "  timeout: %hu",
-         params.min_interval,
-         params.max_interval,
-         params.latency,
-         params.supervision_timeout
-      );
-      params.min_interval = 16;  // Set the interval to 16 * 1.25 = 20ms
-      params.max_interval = 16;
-      params.latency = 10; // event count
-      params.supervision_timeout = 100; // 1 second
-      if (0 == setsockopt(m_sock, SOL_BLUETOOTH, BT_LE_CONN_PARAM, &params, param_len))
-         g_info("Sent connection paramter update");
-      else
-         g_info("Failed to send connection parameter update");
-   }
-   else
-   {
-      int e = errno;
-      g_warning("Failed to retrieve connection parameters: %s", strerror(e));
-   }
-   // */
-
-   // This code requires CAP_NET_RAW, but it allows us to set the necessary
-   // connection parameters with an unpatched kernel.
-   // RawHci raw(m_mac);
-   
-   // I've never gotten it to work without sending this
-   // if (raw.SendConnectionUpdate(16, 16, 10, 100)) // 20ms interval, 10 event buffer
-   //    g_info("Set connection parameters to 20ms");
-   // else
-   //    g_warning("Failed to set the connection parameters");
-   
-   // These are nice to have, but it can work without them.
-   // 161 data bytes, plus 6 byte header. Android sends 17040 microseconds as a
-   // default, but at 16000 hz and two sides, we shouldn't spend more than 10ms
-   // per pdu (each pdu is 320 mono samples)
-   // if (raw.SendDataLen(167, 9000))
-   //    g_info("Set data length to 167 bytes");
-   // else
-   //    g_info("Failed to set data length to 167 bytes");
-   // if (raw.SendPhy2M())
-   //    g_info("Set 2M PHY mode");
-   // else
-   //    g_info("Unable to set 2M PHY mode");
-
-   return true;
+   g_warning("Failed to connect l2cap channel: %s", strerror(err));
+   close(m_sock);
+   m_sock = -1;
+   return false;
 }
 
 
@@ -315,11 +236,12 @@ bool Side::Stop()
    return m_char.audio_control.Write({Control::STOP});
 }
 
-bool Side::WriteAudioFrame(const AudioPacket& packet)
+Side::WriteStatus Side::WriteAudioFrame(const AudioPacket& packet)
 {
    // Write 20ms of data. Should be exactly 160 bytes in size.
    static_assert(sizeof(packet) == 161, "We can only send 161 byte audio packets");
    // assert(m_sock != -1);
+   WriteStatus ret = NOT_READY;
    if (m_sock != -1 && m_ready_to_receive_audio)
    {
       // ++m_packet_count;
@@ -333,20 +255,35 @@ bool Side::WriteAudioFrame(const AudioPacket& packet)
       //    g_timer_start(m_timer.get());
       // }
 
-      if (send(m_sock, &packet, sizeof(packet), MSG_DONTWAIT) == sizeof(packet))
-         return true;
-      else if (errno == EAGAIN)
+      int bytes_sent = send(m_sock, &packet, sizeof(packet), MSG_DONTWAIT);
+      int err = errno;
+      if (bytes_sent == sizeof(packet))
+         ret = WRITE_OK;
+      else if (bytes_sent > (int)sizeof(packet))
+      {
+         g_warning("Ok, this has to be a kernel bug. We tried to send %zu bytes, but really sent %d", sizeof(packet), bytes_sent);
+         ret = OVERSIZED;
+      }
+      else if (bytes_sent >= 0)
+      {
+         g_warning("Only sent %d out of %zu bytes", bytes_sent, sizeof(packet));
+         ret = TRUNCATED;
+      }
+      else if (err == EAGAIN || err == EWOULDBLOCK)
       {
          g_warning("Dropping frame for %s", Description().c_str());
+         ret = BUFFER_FULL;
       }
       else
       {
-         g_warning("Disconnected by %s", Description().c_str());
+         g_warning("Disconnected from %s: (%s)", Description().c_str(), strerror(err));
          close(m_sock);
          m_sock = -1;
+         m_ready_to_receive_audio = false;
+         ret = DISCONNECTED;
       }
    }
-   return false;
+   return ret;
 }
 
 bool Side::UpdateOtherConnected(bool connected)

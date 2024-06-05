@@ -73,7 +73,7 @@ Stream::Stream(
    if (m_stream == nullptr)
       throw std::runtime_error("Failed to allocate stream");
 
-   // These events are called with pipewire thread lock already held.
+   // These events are called from the thread loop.
    static pw_stream_events stream_events {
       .version = PW_VERSION_STREAM_EVENTS,
       .destroy = [](void* d) {
@@ -85,7 +85,10 @@ Stream::Stream(
       .state_changed = [](void* d, enum pw_stream_state old, enum pw_stream_state state, const char* error) {
          auto* self = (Stream*)d;
          printf("on_change_state old: %s  new: %s  error: %s\n", state_str(old), state_str(state), error ? error : "<null>");
-
+         auto lock = self->m_thread->Lock();
+         // CONNECTING called from main thread
+         // PAUSED called from pipewire thread loop,
+         // STREAMING called from pipewire thread loop
          switch (state)
          {
          case PW_STREAM_STATE_UNCONNECTED: self->m_disconnect_cb(); break;
@@ -99,7 +102,7 @@ Stream::Stream(
          }
       },
       // .param_changed = [](void *data, uint32_t id, const struct spa_pod *param) { /* TODO: Define parameters, like volume? */ },
-      .process = [](void* d) { ((Stream*)d)->Process(); },
+      .process = [](void* d) { ((Stream*)d)->Process(); }, // Called from its own thread. 
    };
 
    pw_stream_add_listener(m_stream, &m_stream_listener, &stream_events, this);
@@ -135,6 +138,7 @@ Stream::~Stream()
 
 void Stream::Process()
 {
+   // Called from a new thread that seems created just for the stream
    // Called from pipewire thread in m_thread, lock already held.
    struct pw_buffer* in = pw_stream_dequeue_buffer(m_stream);
    if (!in)

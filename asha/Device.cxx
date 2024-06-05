@@ -7,12 +7,17 @@
 
 using namespace asha;
 
-Device::Device(uint64_t hisync, const std::string& name, const std::string& alias):
+Device::Device(uint64_t hisync, const std::string& name, const std::string& alias, ReconnectCallback cb):
    m_hisync{hisync},
    m_name{name},
-   m_alias{alias}
+   m_alias{alias},
+   m_reconnect_cb{cb}
 {
    auto lock = pw::Thread::Get()->Lock();
+   // TODO: This makes these callbacks do socket processing and dbus calls on
+   //       the pipewire thread. These sometimes have latencies of 200ms or so.
+   //       However, maybe they are ok anyways? Because pipewire has to expect
+   //       this kind of processing, and audio isn't actually streaming yet?
    m_stream = std::make_shared<pw::Stream>(
       name, alias,
       [this]() { Connect(); Start(); },
@@ -148,10 +153,11 @@ bool Device::SendAudio(AudioPacket& left, AudioPacket& right)
       {
          if (!kv.second->Ready())
             continue;
-         if (kv.second->Left())
-            success |= kv.second->WriteAudioFrame(left);
+         Side::WriteStatus status = kv.second->WriteAudioFrame(kv.second->Right() ? right : left);
+         if (status == Side::DISCONNECTED)
+            m_reconnect_cb(kv.first);
          else
-            success |= kv.second->WriteAudioFrame(right);
+            success |= status == Side::WRITE_OK;
       }
       if (success)
          ++m_audio_seq;
@@ -243,6 +249,40 @@ bool Device::RemoveSide(const std::string& path)
 
          for (auto& side: m_sides)
             side.second->UpdateOtherConnected(false);
+         return true;
+      }
+   }
+   return false;
+}
+
+
+// Called when an asha bluetooth device is removed.
+bool Device::Reconnect(const std::string& path)
+{
+   // Called from dbus thread,
+   auto it = m_sides.begin();
+   for (; it != m_sides.end(); ++it)
+   {
+      if (it->first == path)
+      {
+         bool otherstate = false;
+         for (auto& side: m_sides)
+         {
+            if (side.second == it->second)
+               continue;
+            side.second->UpdateOtherConnected(false);
+            otherstate |= side.second->Ready();
+         }
+         it->second->Stop();
+         it->second->Reconnect();
+         it->second->Start(otherstate);
+
+         for (auto& side: m_sides)
+         {
+            if (side.second == it->second)
+               continue;
+            side.second->UpdateOtherConnected(true);
+         }
          return true;
       }
    }
