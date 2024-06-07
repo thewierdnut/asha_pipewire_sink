@@ -57,8 +57,8 @@ private:
 
    Convert m_encoder;
 
-   // double m_prev_stamp = 0;
-   // size_t m_count = 0;
+   double m_prev_stamp = 0;
+   size_t m_count = 0;
 };
 
 }

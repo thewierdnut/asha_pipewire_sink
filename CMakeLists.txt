@@ -27,6 +27,16 @@ add_executable(asha_connection_test
 )
 target_link_libraries(asha_connection_test PkgConfig::GLIB)
 
+add_executable(asha_stream_test
+   asha/Bluetooth.cxx
+   asha/Characteristic.cxx
+   asha/Side.cxx
+   asha/GVariantDump.cxx
+
+   stream_test.cxx
+)
+target_link_libraries(asha_stream_test PkgConfig::GLIB)
+
 
 add_executable(asha_pipewire_sink
    asha/Asha.cxx

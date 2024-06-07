@@ -155,6 +155,54 @@ bool RawHci::ReadExtendedFeatures(uint8_t page, uint64_t* features, bool* more)
 }
 
 
+bool RawHci::ReadLinkQuality(uint8_t* quality)
+{
+   if (!quality) return false;
+   struct {
+      uint8_t  type;
+      uint16_t opcode;
+      uint8_t  len;
+      uint16_t connection_id;
+   } __attribute__((packed)) msg{
+      HCI_COMMAND_PKT,
+      cmd_opcode_pack(OGF_STATUS_PARAM, OCF_READ_LINK_QUALITY),
+      sizeof(uint16_t),
+      m_connection_id
+   };
+   read_link_quality_rp response{};
+   if (SendAndWaitForResponse(msg, &response) && response.status == 0)
+   {
+      *quality = response.link_quality;
+      return true;
+   }
+   return false;
+}
+
+
+bool RawHci::ReadRssi(int8_t* rssi)
+{
+   if (!rssi) return false;
+   struct {
+      uint8_t  type;
+      uint16_t opcode;
+      uint8_t  len;
+      uint16_t connection_id;
+   } __attribute__((packed)) msg{
+      HCI_COMMAND_PKT,
+      cmd_opcode_pack(OGF_STATUS_PARAM, OCF_READ_RSSI),
+      sizeof(uint16_t),
+      m_connection_id
+   };
+   read_rssi_rp response{};
+   if (SendAndWaitForResponse(msg, &response) && response.status == 0)
+   {
+      *rssi = response.rssi;
+      return true;
+   }
+   return false;
+}
+
+
 bool RawHci::SendPhy2M() noexcept
 {
    struct {

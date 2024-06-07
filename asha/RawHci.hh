@@ -21,6 +21,8 @@ public:
 
    //uint64_t ReadSupportedFeatures();
    bool ReadExtendedFeatures(uint8_t page, uint64_t* features, bool* more);
+   bool ReadLinkQuality(uint8_t* quality);
+   bool ReadRssi(int8_t* rssi);
 
    // Set Phy2M. Requires CAP_NET_RAW access.
    bool SendPhy2M() noexcept;

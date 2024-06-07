@@ -137,7 +137,18 @@ void Device::Stop()
 // Called whenever another 160 bytes of g722 audio is ready.
 bool Device::SendAudio(AudioPacket& left, AudioPacket& right)
 {
-   // Already holding pipewire thread lock.
+   bool ready = false;
+   for (auto& kv: m_sides)
+   {
+      if (kv.second->Ready())
+      {
+         ready = true;
+         break;
+      }
+   }
+   if (!ready)
+      return false;
+
    if (m_skip_packets > 0)
    {
       // Don't send packets yet.
@@ -202,7 +213,7 @@ void Device::AddSide(const std::string& path, const std::shared_ptr<Side>& side)
    // If we bring in a new side, when the other side already has packets
    // queued up, then we want to drain the buffer so that it is easier for
    // the sides to synchronize when the audio resumes
-   m_skip_packets = m_sides.empty() ? 0 : 20;
+   m_skip_packets = 6;
 
    m_sides.emplace_back(path, side);
    if (m_state == CONNECTED || m_state == PAUSED || m_state == STREAMING)

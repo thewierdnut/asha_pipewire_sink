@@ -171,6 +171,25 @@ protected:
       }
    }
 
+   void CheckHciLq(RawHci& hci)
+   {
+      uint8_t quality = 0;
+      if (hci.ReadLinkQuality(&quality))
+         g_info("    Quality: %hhu", quality);
+      else
+         g_info("    Unable to read link quality");
+   }
+
+   void CheckHciRssi(RawHci& hci)
+   {
+      uint8_t rssi = 0;
+      if (hci.ReadLinkQuality(&rssi))
+         g_info("    Rssi: %hhd", rssi);
+      else
+         g_info("    Unable to read rssi");
+   }
+
+
    void CheckMTU(const std::shared_ptr<asha::Side>& device)
    {
       uint16_t imtu = 0;

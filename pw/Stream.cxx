@@ -147,11 +147,9 @@ void Stream::Process()
       return;
    }
 
-   // TODO: Here, combine just memcpy's the data into the out stream buffers.
-   //       We need to actually read it and convert it to g.722
    uint32_t left = in->buffer->n_datas >= 1 ? in->buffer->datas[0].chunk->size : 0;
    uint32_t right = in->buffer->n_datas >= 2 ? in->buffer->datas[1].chunk->size : 0;
-   // printf("Received %d channels of sound data (%d, %d). \n", in->buffer->n_datas, left, right);
+   // printf("Received %d channels of sound data (%d, %d). \n", in->buffer->n_datas, left/2, right/2);
    assert(left == right);
    if (left == right)
    {
@@ -186,13 +184,12 @@ void Stream::Process()
    // if (t - m_prev_stamp > 10)
    // {
    //    double hz = m_count / (t - m_prev_stamp);
-   //    printf("Receiving data at %u hz", (unsigned)hz);
+   //    printf("Receiving data at %u hz\n", (unsigned)hz);
    //    m_prev_stamp = t;
    //    m_count = 0;
    // }
 
 
-   // TODO: I have a SEGV here on shutdown sometimes...
    // Place the buffer back so that it can be reused.
    pw_stream_queue_buffer(m_stream, in);
 }
