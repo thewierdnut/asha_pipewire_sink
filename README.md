@@ -13,8 +13,13 @@ However:
 - LE Audio-enabled hearing devices are dual mode, meaning they can use either ASHA or LE Audio. This dual functionality has proven useful since LE Audio implementation by manufacturers has been problematic so far.
 
 
-### Poor sound quality
-If you have the ability to use LE Audio, then you definitely should prefer it over this project. Asha only specifies one protocol, G.722 at at 16 kHz sample rate (though there is a hidden 24 kHz sample rate that I doubt I will ever see implemented). This is a protocol from the 90's, and it sounds like it too. However, if your hearing devices only support ASHA audio, then read on.
+### Sound quality
+If you have the ability to use LE Audio, then you should definitely prefer it over this project because:
+- LE Audio offers lower latency.
+- Your devices can operate in hands-free mode, functioning as both receivers and input microphones (a feature not available with ASHA).
+- LE Audio utilizes a vastly improved audio codec called LC3, replacing the outdated G.722 codec. While this upgrade is promising in theory, hearing devices are limited by the capabilities of their receivers, restricting their output to 8-12kHz. Consequently, there are improvements in sound quality, albeit marginal.
+
+However, if your hearing devices only support ASHA audio, then read on.
 
 ### Difficult setup
 The ASHA audio spec relies on the central manipulating the stream properties to match what the hearing device expects, but bluez is designed to allow the peripheral to set those properties itself (spoiler alert, they don't). In order to get a good listening experience, you will have to manually configure the bluetooth service and the bluetooth kernel module to set those properties yourself.
