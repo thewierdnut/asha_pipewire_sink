@@ -7,7 +7,11 @@ This project will recognize asha-compatible hearing devices that have been conne
 
 ## Caveats
 ### Asha Audio is dead. Long live Asha Audio
-Android's ASHA Hearing Aid Audio Support has been superceded by Bluetooth LE audio. Bluez already supports LE Audio, and I rather suspect that future hearing devices will no longer support the older asha protocol. However, there are a large number of existing devices that use ASHA audio, and since these devices tend to cost more than my car, they have an extremely long replacement cycle. I suspect that many of these devices will be around for at least another ten years.
+Android's ASHA Hearing Aid Audio Support has been superceded by Bluetooth LE audio. Bluez already supports LE Audio, and I rather suspect that future hearing devices will no longer support the older asha protocol.
+However: 
+- There are a large number of existing devices that use ASHA audio. Additionally, some of the newest releases are still ASHA-only. Since these devices tend to be very expensive, they have an extremely long replacement cycle. I suspect that many of these devices will be around for at least another ten years.
+- LE Audio-enabled hearing devices are dual mode, meaning they can use either ASHA or LE Audio. This dual functionality has proven useful since LE Audio implementation by manufacturers has been problematic so far.
+
 
 ### Poor sound quality
 If you have the ability to use LE Audio, then you definitely should prefer it over this project. Asha only specifies one protocol, G.722 at at 16 kHz sample rate (though there is a hidden 24 kHz sample rate that I doubt I will ever see implemented). This is a protocol from the 90's, and it sounds like it too. However, if your hearing devices only support ASHA audio, then read on.
