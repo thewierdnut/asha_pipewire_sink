@@ -56,6 +56,13 @@ public:
       Stop();
    }
 
+   void SetVolume(int8_t volume)
+   {
+      for (auto& d: m_devices)
+         d.second->SetStreamVolume(volume);
+      m_volume = volume;
+   }
+
    bool Start(const std::string& algorithm)
    {
       m_algorithm = algorithm;
@@ -83,6 +90,7 @@ public:
             return false;
          }
       }
+
       return true;
    }
 
@@ -133,7 +141,7 @@ protected:
          std::cout << "    Connected: " << (side->Connect() ? "true": "false") << '\n';
          CheckPHY(side);
          usleep(10000);
-
+         side->SetStreamVolume(m_volume);
          Stop();
 
          m_devices[d.path] = side;
@@ -374,6 +382,7 @@ private:
    std::string m_algorithm;
 
    uint8_t m_seq = 0;
+   int8_t m_volume = -64;
 
    asha::Bluetooth m_b; // needs to be last
 };
@@ -385,7 +394,8 @@ void HelpAndExit(const std::string& path)
              << "Arguments:\n"
              << "   --left  <raw g722 file>     File to feed to left or mono devices\n"
              << "   --right <raw g722 file>     File to feed to right devices\n"
-             << "   --algorithm (deadline|fixed|poll) Streaming algorithm to use [default: deadline]\n";
+             << "   --algorithm (deadline|fixed|poll) Streaming algorithm to use [default: deadline]\n"
+             << "   --volume [-128 to 0]        Set the volume [default: -64]\n";
    exit(1);
 }
 
@@ -397,6 +407,7 @@ int main(int argc, char** argv)
    std::string left_path;
    std::string right_path;
    std::string algorithm = "deadline";
+   int8_t volume = -64;
 
    for (int i = 1; i < argc; ++i)
    {
@@ -404,8 +415,15 @@ int main(int argc, char** argv)
          left_path = argv[++i];
       else if (0 == strcmp(argv[i], "--right") && i + 1 < argc)
          right_path = argv[++i];
-      else if (0 == strcmp(argv[i], "--algorithm"))
+      else if (0 == strcmp(argv[i], "--algorithm") && i + 1 < argc)
          algorithm = argv[++i];
+      else if (0 == strcmp(argv[i], "--volume") && i + 1 < argc)
+      {
+         int v = atoi(argv[++i]);
+         if (v < -128) v = -128;
+         if (v > 0)    v = 0;
+         volume = v;
+      }
       else
       {
          std::cout << "Don't understand argument\n";
@@ -430,6 +448,7 @@ int main(int argc, char** argv)
    }
 
    StreamTest c(left_path, right_path);
+   c.SetVolume(volume);
 
    if (!c.Start(algorithm))
    {
