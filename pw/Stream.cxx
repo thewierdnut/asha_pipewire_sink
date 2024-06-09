@@ -84,7 +84,7 @@ Stream::Stream(
       },
       .state_changed = [](void* d, enum pw_stream_state old, enum pw_stream_state state, const char* error) {
          auto* self = (Stream*)d;
-         printf("on_change_state old: %s  new: %s  error: %s\n", state_str(old), state_str(state), error ? error : "<null>");
+         printf("on_change_state old: %s  new: %s %s\n", state_str(old), state_str(state), error ? error : "");
          auto lock = self->m_thread->Lock();
          // CONNECTING called from main thread
          // PAUSED called from pipewire thread loop,
@@ -115,7 +115,7 @@ Stream::Stream(
    };
    int flags = PW_STREAM_FLAG_AUTOCONNECT
              | PW_STREAM_FLAG_MAP_BUFFERS
-             | PW_STREAM_FLAG_RT_PROCESS; // TODO: is the l2cap send() call realtime safe?
+             | PW_STREAM_FLAG_RT_PROCESS; // Using a ring buffer to transfer to the send thread means this is RT safe.
    int res = pw_stream_connect(m_stream, SPA_DIRECTION_INPUT, PW_ID_ANY, (pw_stream_flags)flags, params, 1);
    if (res < 0)
    {

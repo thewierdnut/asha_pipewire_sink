@@ -15,6 +15,8 @@ int Shutdown(void* ml)
 }
 
 
+
+
 int main()
 {
    g_info("Starting...");
@@ -23,7 +25,30 @@ int main()
    auto quitter2 = g_unix_signal_add(SIGTERM, Shutdown, loop.get());
    asha::Asha a;
 
+   static size_t dropped = 0;
+   static size_t failed = 0;
+
+   guint stat_timer = g_timeout_add(10000, [](void* userdata)->gboolean {
+      auto& a = *(asha::Asha*)userdata;
+
+      size_t new_dropped = a.RingDropped();
+      size_t new_failed = a.FailedWrites();
+
+      std::cout << "Ring Occupancy: " << a.Occupancy()
+                << " High: " << a.OccupancyHigh()
+                << " Ring Dropped: " << new_dropped - dropped
+                << " Total: " << new_dropped
+                << " Adapter Dropped: " << new_failed - failed
+                << " Total: " << new_failed
+                << '\n';
+
+      dropped = new_dropped;
+      failed = new_failed;
+      return G_SOURCE_CONTINUE;
+   }, &a);
+
    g_main_loop_run(loop.get());
+   g_source_remove(stat_timer);
    g_source_remove(quitter1);
    g_source_remove(quitter2);
 

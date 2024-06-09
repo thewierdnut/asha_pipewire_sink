@@ -27,6 +27,45 @@ Asha::~Asha()
 }
 
 
+size_t Asha::Occupancy() const
+{
+   size_t ret = 0;
+   for (auto& kv: m_devices)
+      ret += kv.second->Occupancy();
+   return ret;
+}
+
+
+size_t Asha::OccupancyHigh() const
+{
+   size_t ret = 0;
+   for (auto& kv: m_devices)
+   {
+      if (ret < kv.second->OccupancyHigh())
+         ret = kv.second->OccupancyHigh();
+   }
+   return ret;
+}
+
+
+size_t Asha::RingDropped() const
+{
+   size_t ret = 0;
+   for (auto& kv: m_devices)
+      ret += kv.second->RingDropped();
+   return ret;
+}
+
+
+size_t Asha::FailedWrites() const
+{
+   size_t ret = 0;
+   for (auto& kv: m_devices)
+      ret += kv.second->FailedWrites();
+   return ret;
+}
+
+
 void Asha::OnAddDevice(const Bluetooth::BluezDevice& d)
 {
    // Called when we get a new device.

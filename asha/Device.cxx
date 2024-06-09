@@ -1,5 +1,6 @@
 #include "Device.hh"
 
+#include "Buffer.hh"
 #include "../pw/Stream.hh"
 #include "../pw/Thread.hh"
 #include "Side.hh"
@@ -11,20 +12,24 @@ Device::Device(uint64_t hisync, const std::string& name, const std::string& alia
    m_hisync{hisync},
    m_name{name},
    m_alias{alias},
+   m_buffer{new Buffer<8>([this](AudioPacket& l, AudioPacket& r) { return SendAudio(l, r); })},
    m_reconnect_cb{cb}
 {
    auto lock = pw::Thread::Get()->Lock();
-   // TODO: This makes these callbacks do socket processing and dbus calls on
-   //       the pipewire thread. These sometimes have latencies of 200ms or so.
-   //       However, maybe they are ok anyways? Because pipewire has to expect
-   //       this kind of processing, and audio isn't actually streaming yet?
    m_stream = std::make_shared<pw::Stream>(
       name, alias,
       [this]() { Connect(); Start(); },
       [this]() { Stop(); Disconnect(); },
       [this]() { /* Start(); */ }, // I'm seeing about a one second latency before
       [this]() { /* Stop(); */ },  // I actually hear audio, so lets start immediately.
-      [this](AudioPacket& l, AudioPacket& r) { SendAudio(l, r); }
+      [this](AudioPacket& l, AudioPacket& r) {
+         // TODO: redesign this api so that we can retrieve the pointer and
+         //       have the pipewire stream fill it in.
+         auto buffers = m_buffer->NextBuffer();
+         *buffers.first = l;
+         *buffers.second = r;
+         m_buffer->SendBuffer();
+      }
    );
 }
 
@@ -34,6 +39,31 @@ Device::~Device()
    m_stream.reset();
    m_sides.clear();
 }
+
+
+size_t Device::Occupancy() const
+{
+   return m_buffer->Occupancy();
+}
+
+
+size_t Device::OccupancyHigh() const
+{
+   return m_buffer->OccupancyHigh();
+}
+
+
+size_t Device::RingDropped() const
+{
+   return m_buffer->RingDropped();
+}
+
+
+size_t Device::FailedWrites() const
+{
+   return m_buffer->FailedWrites();
+}
+
 
 // Called by pipewire when a node has been connected. (Since it is a stream
 // object, this will happen immediately, as it attaches a conversion node in

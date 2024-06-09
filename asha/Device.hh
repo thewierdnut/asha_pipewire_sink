@@ -19,6 +19,7 @@ namespace pw {
 namespace asha {
 
 class Side;
+template <size_t T> class Buffer;
 
 // Manage a pair of hearing devices.
 class Device final
@@ -32,6 +33,11 @@ public:
    const std::string& Alias() const { return m_alias; }
 
    size_t SideCount() const { return m_sides.size(); }
+
+   size_t Occupancy() const;
+   size_t OccupancyHigh() const;
+   size_t RingDropped() const;
+   size_t FailedWrites() const;
 
 protected:
    // These will be called by the asha management singleton. (main thread)
@@ -53,6 +59,8 @@ private:
    const std::string m_name;
    const std::string m_alias;
    enum {DISCONNECTED, CONNECTED, PAUSED, STREAMING} m_state = DISCONNECTED;
+
+   std::shared_ptr<Buffer<8>> m_buffer;
 
    // Access to this needs to be guarded by the pipewire thread lock.
    std::vector<std::pair<std::string, std::shared_ptr<Side>>> m_sides;
