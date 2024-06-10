@@ -213,6 +213,8 @@ void Side::SetStreamVolume(int8_t volume)
 void Side::SetDeviceVolume(int8_t volume)
 {
    // TODO: This will probably be manufacturer specific.
+   // Starkey:
+   //    Volume is f3f594f9-e210-48f3-85e2-4b0cf235a9d3, range of 00 to ff
 }
 
 
