@@ -102,7 +102,7 @@ Stream::Stream(
          }
       },
       // .param_changed = [](void *data, uint32_t id, const struct spa_pod *param) { /* TODO: Define parameters, like volume? */ },
-      .process = [](void* d) { ((Stream*)d)->Process(); }, // Called from its own thread. 
+      .process = [](void* d) { ((Stream*)d)->Process(); }, // Called from its own thread.
    };
 
    pw_stream_add_listener(m_stream, &m_stream_listener, &stream_events, this);

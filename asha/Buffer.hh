@@ -60,7 +60,7 @@ public:
 
    size_t Occupancy() const { return m_occupancy; }
    size_t OccupancyHigh() const { return m_high_occupancy; }
-   size_t RingDropped() const { return m_buffer_full; }
+   size_t RingDropped() const { return m_buffer_full.load(std::memory_order_relaxed); }
    size_t FailedWrites() const { return m_failed_writes; }
 
    RawS16* NextBuffer()
@@ -69,9 +69,9 @@ public:
       size_t idx = m_write.load(std::memory_order_relaxed);
       size_t read = m_read.load(std::memory_order_acquire);
 
-      if (idx - read + 1 >= RING_SIZE) // Mind the sentry entry.
+      if (idx - read >= RING_SIZE)
       {
-         ++m_buffer_full;
+         m_buffer_full.fetch_add(1, std::memory_order_relaxed);
          return nullptr;
       }
       return &m_buffer[idx & (RING_SIZE-1)];
@@ -119,6 +119,13 @@ protected:
                // TODO: if the send fails, should we drain the buffer, just to
                //       improve the odds on catching back up?
                ++m_read;
+               if (m_occupancy == RING_SIZE)
+               {
+                  // Our buffer is full, which means we have hit max latency.
+                  // Empty out the ring to try and keep up.
+                  m_read = write;
+                  m_buffer_full.fetch_add(RING_SIZE - 1, std::memory_order_relaxed);
+               }
             }
             else
             {
@@ -159,9 +166,9 @@ private:
    size_t m_failed_writes = 0;
    size_t m_occupancy = 0;
    size_t m_high_occupancy = 0;
-   uint8_t m_padding1[64 - sizeof(size_t) - sizeof(std::atomic<size_t>)];
+   uint8_t m_padding1[64 - 2 * sizeof(std::atomic<size_t>)];
    std::atomic<size_t> m_write{};
-   size_t m_buffer_full = 0;
+   std::atomic<size_t> m_buffer_full{};
    uint8_t m_padding2[64];
 
    // We use a sentry entry that is always unused, so that we can distinguish
