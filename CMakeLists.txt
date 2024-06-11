@@ -48,7 +48,6 @@ add_executable(asha_pipewire_sink
 
    g722/g722_encode.c
 
-   pw/Convert.cxx
    pw/Stream.cxx
    pw/Thread.cxx
 

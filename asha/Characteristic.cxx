@@ -268,7 +268,8 @@ std::shared_ptr<_GVariant> Characteristic::Call(const char* fname, const std::sh
       );
       if (e)
       {
-         g_error("Error calling %s: %s", fname, e->message);
+         // TODO: knowing the severity of the error here depends on context
+         g_warning("Error calling %s: %s", fname, e->message);
          g_error_free(e);
       }
       if (result)

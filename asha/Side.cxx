@@ -235,18 +235,33 @@ bool Side::Start(bool otherstate)
 {
    uint32_t phys = 0;
    socklen_t size = sizeof(phys);
-   if (getsockopt(m_sock, SOL_BLUETOOTH, BT_PHY, &phys, &size) >= 0)
-   {
-      if ((phys & BT_PHY_LE_2M_TX) == 0)
-      {
-         g_warning("2M PHY not enabled");
-         g_info("        Unless you enable LE_2M_TX, don't expect to be able to stream to more than one device.");
-         g_info("        You can use `btmgmt phy` to check the supported phy's, and enable additional phy's by running a command like");
-         g_info("           btmgmt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX");
-         g_info("        and then disconnecting and reconnecting your hearing devices.");
-         g_info("        Note that some devices and adapters don't support 2M PHY's, despite advertising otherwise");
-      }
-   }
+   
+   // TODO: Bah. This still keeps posting false positives.
+   // bool phy_2m_enabled = false;
+   // // Give it 200 ms to finish phy negotiation.
+   // for (size_t i = 0; i < 10 && !phy_2m_enabled; ++i)
+   // {
+   //    if (getsockopt(m_sock, SOL_BLUETOOTH, BT_PHY, &phys, &size) >= 0)
+   //    {
+   //       if (phys & BT_PHY_LE_2M_TX)
+   //       {
+   //          phy_2m_enabled = true;
+   //          break;
+   //       }
+   //    }
+   //    else
+   //       break; // No point in polling. Something else is broken
+   //    g_usleep(20000);
+   // }
+   // if (!phy_2m_enabled)
+   // {
+   //    g_warning("2M PHY not enabled");
+   //    g_info("        Unless you enable LE_2M_TX, don't expect to be able to stream to more than one device.");
+   //    g_info("        You can use `btmgmt phy` to check the supported phy's, and enable additional phy's by running a command like");
+   //    g_info("           btmgmt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX");
+   //    g_info("        and then disconnecting and reconnecting your hearing devices.");
+   //    g_info("        Note that some devices and adapters don't support 2M PHY's, despite advertising otherwise");
+   // }
 
    static constexpr uint8_t G722_16KHZ = 1;
    m_ready_to_receive_audio = false;

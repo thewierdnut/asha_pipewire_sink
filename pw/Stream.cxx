@@ -95,7 +95,7 @@ Stream::Stream(
          case PW_STREAM_STATE_CONNECTING:  self->m_connect_cb();    break;
          case PW_STREAM_STATE_PAUSED:      self->m_stop_cb();       break;
          case PW_STREAM_STATE_STREAMING:
-            self->m_encoder.Reset();
+            self->m_samples_used = 0;
             self->m_start_cb();
             break;
          default: break;
@@ -162,12 +162,28 @@ void Stream::Process()
       assert(lsize == rsize);
       if (lsize == rsize)
       {
-         m_encoder.In(
-            SPA_PTROFF(l.data, loffs, int16_t),
-            SPA_PTROFF(r.data, roffs, int16_t),
-            left / 2, // Convert from bytes to samples.
-            m_data_cb
-         );
+         size_t samples = left / 2;
+         size_t offset = 0;
+         do
+         {
+            size_t samples_needed = RawS16::SAMPLE_COUNT - m_samples_used;
+            size_t samples_to_copy = std::min(samples_needed, samples);
+            memcpy(m_samples.l + m_samples_used, SPA_PTROFF(l.data, loffs, int16_t) + offset, samples_to_copy * 2);
+            memcpy(m_samples.r + m_samples_used, SPA_PTROFF(r.data, loffs, int16_t) + offset, samples_to_copy * 2);
+            m_samples_used += samples_to_copy;
+            samples -= samples_to_copy;
+            offset += samples_to_copy;
+            if (m_samples_used >= RawS16::SAMPLE_COUNT)
+            {
+               m_data_cb(m_samples);
+               m_samples_used = 0;
+            }
+            else
+            {
+               break;
+            }
+         }
+         while (samples > 0);
       }
       else
       {

@@ -10,6 +10,7 @@
 #include <string>
 
 #include "AudioPacket.hh"
+#include "../g722/g722_enc_dec.h"
 
 namespace pw {
    class Stream;
@@ -50,7 +51,7 @@ protected:
    void Disconnect();
    void Start();
    void Stop();
-   bool SendAudio(AudioPacket& left, AudioPacket& right);
+   bool SendAudio(const RawS16& samples);
    void SetStreamVolume(bool left, int8_t v);
    void SetDeviceVolume(bool left, int8_t v);
 
@@ -60,7 +61,11 @@ private:
    const std::string m_alias;
    enum {DISCONNECTED, CONNECTED, PAUSED, STREAMING} m_state = DISCONNECTED;
 
-   std::shared_ptr<Buffer<8>> m_buffer;
+
+   static constexpr size_t RING_BUFFER_SIZE = 4;
+   std::shared_ptr<Buffer<RING_BUFFER_SIZE>> m_buffer;
+   g722_encode_state_t m_state_left{};
+   g722_encode_state_t m_state_right{};
 
    // Access to this needs to be guarded by the pipewire thread lock.
    std::vector<std::pair<std::string, std::shared_ptr<Side>>> m_sides;
@@ -68,8 +73,6 @@ private:
    std::shared_ptr<pw::Stream> m_stream;
    uint8_t m_audio_seq = 0;
    int8_t m_volume = -60;
-
-   int m_skip_packets = 0; // Used to drain the packets to synchronize sides.
 
    // If we need to reconnect, we need to do it on the main thread, and it
    // needs to be serialized with connect/disconnect events.

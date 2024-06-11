@@ -13,25 +13,8 @@
 namespace asha
 {
 
-static AudioPacket SILENCE = {
-   0,
-   {
-      0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa,
-      0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa,
-      0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa,
-      0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xfa, 0xf7, 0xf7, 0xf7, 0xf7,
-      0xf7, 0xf7, 0xf7, 0xf8, 0xf7, 0xfa, 0xf7, 0xf8, 0xf8, 0xfa, 0xfa, 0xf7,
-      0xf7, 0xf8, 0xf7, 0xfa, 0xf8, 0xf7, 0xfa, 0xf8, 0xf7, 0xfa, 0xf7, 0xf8,
-      0xf8, 0xfa, 0xdb, 0xf0, 0xf8, 0xf8, 0xf8, 0xf8, 0xfa, 0xdb, 0xf1, 0xf8,
-      0xf8, 0xfa, 0xfa, 0xf8, 0xde, 0xf3, 0xfa, 0xf8, 0xf8, 0xfa, 0xfa, 0xde,
-      0xf0, 0xfa, 0xfa, 0xf8, 0xf8, 0xfa, 0xdb, 0xf1, 0xfa, 0xfa, 0xf8, 0xf8,
-      0xfa, 0xdc, 0xf2, 0xfa, 0xf8, 0xf8, 0xfa, 0xfa, 0xde, 0xf0, 0xfa, 0xfa,
-      0xf8, 0xf8, 0xfa, 0xd8, 0xf3, 0xfa, 0xf8, 0xf8, 0xfa, 0xde, 0xf3, 0xfa,
-      0xf8, 0xf8, 0xfa, 0xde, 0xf3, 0xfa, 0xf8, 0xf8, 0xfa, 0xde, 0xf2, 0xfa,
-      0xf8, 0xf8, 0xfa, 0xde, 0xf2, 0xfa, 0xf8, 0xf8, 0xfa, 0xde, 0xf2, 0xfa,
-      0xf8, 0xf8, 0xfa, 0xde
-   }
-};
+static RawS16 SILENCE = {};
+
 
 // The tested asha devices don't like the irregular packet delivery caused by
 // the mismatch between the frame sizes between pipewire and asha. This class
@@ -46,14 +29,27 @@ class Buffer final
 public:
    static_assert((RING_SIZE & (RING_SIZE - 1)) == 0, "RING_SIZE must be a power of two");
    static_assert(RING_SIZE > 1, "RING_SIZE must be at least 2");
-   typedef std::function<bool(AudioPacket&, AudioPacket&)> DataCallback;
+   typedef std::function<bool(const RawS16&)> DataCallback;
 
    Buffer(DataCallback cb):m_data_cb{cb}
    {
-      m_running = true;
-      m_thread = std::thread(&Buffer::DeliveryThread, this);
+      
    }
    ~Buffer()
+   {
+      Stop();
+   }
+
+   void Start()
+   {
+      if (!m_thread.joinable())
+      {
+         m_running = true;
+         m_thread = std::thread(&Buffer::DeliveryThread, this);
+      }
+   }
+
+   void Stop()
    {
       if (m_thread.joinable())
       {
@@ -67,7 +63,7 @@ public:
    size_t RingDropped() const { return m_buffer_full; }
    size_t FailedWrites() const { return m_failed_writes; }
 
-   std::pair<AudioPacket*, AudioPacket*> NextBuffer()
+   RawS16* NextBuffer()
    {
       // ...RxxW...
       size_t idx = m_write.load(std::memory_order_relaxed);
@@ -76,10 +72,9 @@ public:
       if (idx - read + 1 >= RING_SIZE) // Mind the sentry entry.
       {
          ++m_buffer_full;
-         return {nullptr, nullptr};
+         return nullptr;
       }
-      auto& buffer = m_buffer[idx & (RING_SIZE-1)];
-      return {&buffer.left, &buffer.right};
+      return &m_buffer[idx & (RING_SIZE-1)];
    }
 
    void SendBuffer()
@@ -98,6 +93,8 @@ protected:
 
    void DeliveryThread()
    {
+      pthread_setname_np(m_thread.native_handle(), "buffer_encode");
+
       // Need to deliver a packet every 20 ms. Wake up every 5 ms and check for
       // one.
       static const struct timespec SLEEP_INTERVAL{0, 5000000};
@@ -117,7 +114,7 @@ protected:
             if (write > idx)
             {
                auto& buffer = m_buffer[idx & (RING_SIZE-1)];
-               if (!m_data_cb(buffer.left, buffer.right))
+               if (!m_data_cb(buffer))
                   ++m_failed_writes;
                // TODO: if the send fails, should we drain the buffer, just to
                //       improve the odds on catching back up?
@@ -135,7 +132,7 @@ protected:
                //       overtaken pipewire, and it may be better to just skip
                //       the packet to allow the hearing devices to drain their
                //       buffers and catch up.
-               if (!m_data_cb(SILENCE, SILENCE))
+               if (!m_data_cb(SILENCE))
                   ++m_failed_writes;
             }
             next += INTERVAL;
@@ -158,22 +155,19 @@ private:
 
    // Use padding to force reader/writer vars to be on their own cache lines.
    uint8_t m_padding0[64 - 3 * sizeof(size_t) - sizeof(std::atomic<size_t>)];
-   std::atomic<size_t> m_read;
+   std::atomic<size_t> m_read{};
    size_t m_failed_writes = 0;
    size_t m_occupancy = 0;
    size_t m_high_occupancy = 0;
    uint8_t m_padding1[64 - sizeof(size_t) - sizeof(std::atomic<size_t>)];
-   std::atomic<size_t> m_write;
+   std::atomic<size_t> m_write{};
    size_t m_buffer_full = 0;
    uint8_t m_padding2[64];
 
    // We use a sentry entry that is always unused, so that we can distinguish
    // between a full ring and an empty ring. This means that technically we
    // only have room for RING_SIZE - 1 buffers.
-   struct {
-      AudioPacket left;
-      AudioPacket right;
-   } m_buffer[RING_SIZE];
+   RawS16 m_buffer[RING_SIZE];
 };
 
 }

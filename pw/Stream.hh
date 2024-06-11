@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Convert.hh"
-
 #include "../asha/AudioPacket.hh"
 
 #include <spa/param/audio/raw.h>
@@ -25,7 +23,7 @@ class Thread;
 class Stream
 {
 public:
-   typedef std::function<void(AudioPacket&, AudioPacket&)> DataCallback;
+   typedef std::function<void(RawS16&)> DataCallback;
    typedef std::function<void(void)> EventCallback;
 
    Stream(const std::string& name, const std::string& alias,
@@ -55,7 +53,8 @@ private:
    EventCallback m_stop_cb;
    DataCallback m_data_cb;
 
-   Convert m_encoder;
+   RawS16 m_samples;
+   size_t m_samples_used = 0;
 
    double m_prev_stamp = 0;
    size_t m_count = 0;

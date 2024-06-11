@@ -12,7 +12,7 @@ Device::Device(uint64_t hisync, const std::string& name, const std::string& alia
    m_hisync{hisync},
    m_name{name},
    m_alias{alias},
-   m_buffer{new Buffer<8>([this](AudioPacket& l, AudioPacket& r) { return SendAudio(l, r); })},
+   m_buffer{new Buffer<RING_BUFFER_SIZE>([this](const RawS16& samples) { return SendAudio(samples); })},
    m_reconnect_cb{cb}
 {
    auto lock = pw::Thread::Get()->Lock();
@@ -20,15 +20,17 @@ Device::Device(uint64_t hisync, const std::string& name, const std::string& alia
       name, alias,
       [this]() { Connect(); Start(); },
       [this]() { Stop(); Disconnect(); },
-      [this]() { /* Start(); */ }, // I'm seeing about a one second latency before
-      [this]() { /* Stop(); */ },  // I actually hear audio, so lets start immediately.
-      [this](AudioPacket& l, AudioPacket& r) {
+      [this]() {  },
+      [this]() {  },
+      [this](const RawS16& samples) {
          // TODO: redesign this api so that we can retrieve the pointer and
          //       have the pipewire stream fill it in.
-         auto buffers = m_buffer->NextBuffer();
-         *buffers.first = l;
-         *buffers.second = r;
-         m_buffer->SendBuffer();
+         auto buffer = m_buffer->NextBuffer();
+         if (buffer)
+         {
+            *buffer = samples;
+            m_buffer->SendBuffer();
+         }
       }
    );
 }
@@ -75,27 +77,11 @@ void Device::Connect()
    for (auto& kv: m_sides)
    {
       auto& side = kv.second;
-      // TODO: Investigate whether this is really needed. I think the answer is
-      //       yes-ish, unless we are configured with the correct parameters in
-      //       /etc/bluetooth/main.conf
-      // side->UpdateConnectionParameters(0x10);
       if (!side->Connect())
       {
          g_error("Failed to connect to %s", side->Description().c_str());
          continue;
       }
-      // side->UpdateConnectionParameters(0x10); // Ditto.
-
-      // Doc says to do this, but android hci captures don't show this
-      // happening...
-      // Inform the others
-      // for (size_t j = 0; j < m_current_device->devices.size(); ++j)
-      // {
-      //    if (i == j)
-      //       continue;
-      //    auto& side = m_current_device->devices[j];
-      //    side->StatusUpdateOtherConnected(true);
-      // }
    }
 }
 
@@ -114,17 +100,6 @@ void Device::Disconnect()
          g_error("Failed to disconnect from %s", kv.second->Description().c_str());
          continue;
       }
-
-      // Doc says to do this, but android hci captures don't show this
-      // happening...
-      // Inform the others
-      // for (size_t j = 0; j < m_current_device->devices.size(); ++j)
-      // {
-      //    if (i == j)
-      //       continue;
-      //    auto& side = m_current_device->devices[j];
-      //    side->StatusUpdateOtherConnected(false);
-      // }
    }
 }
 
@@ -134,9 +109,15 @@ void Device::Start()
 {
    // Already holding pipewire thread lock.
 
-   // Asha docs says otherstate here is "whether the other  side of the
+   // Rate means bit/sec telephone bandwidth, not sample rate. 64000
+   // just means "Use all 8 bits of each byte".
+   g722_encode_init(&m_state_left, 64000, G722_PACKED);
+   g722_encode_init(&m_state_right, 64000, G722_PACKED);
+
+   // Asha docs says otherstate here is "whether the other side of the
    // binaural devices is connected", but the android source checks if
    // the other side is *streaming* (ie connected, and already started
+   m_buffer->Start();
 
    m_state = STREAMING;
    m_audio_seq = 0;
@@ -157,6 +138,7 @@ void Device::Start()
 void Device::Stop()
 {
    // Already holding pipewire thread lock.
+   m_buffer->Stop();
    if (m_state == STREAMING)
       for (auto& kv: m_sides)
          kv.second->Stop();
@@ -164,8 +146,8 @@ void Device::Stop()
 }
 
 
-// Called whenever another 160 bytes of g722 audio is ready.
-bool Device::SendAudio(AudioPacket& left, AudioPacket& right)
+// Called whenever another 320 samples are ready.
+bool Device::SendAudio(const RawS16& samples)
 {
    bool ready = false;
    for (auto& kv: m_sides)
@@ -179,21 +161,37 @@ bool Device::SendAudio(AudioPacket& left, AudioPacket& right)
    if (!ready)
       return false;
 
-   if (m_skip_packets > 0)
-   {
-      // Don't send packets yet.
-      --m_skip_packets;
-      return true;
-   }
-
    bool success = false;
    if (m_state == STREAMING)
    {
+      AudioPacket left;
+      AudioPacket right;
       left.seq = right.seq = m_audio_seq;
+
+      bool left_encoded = false;
+      bool right_encoded = false;
+
       for (auto& kv: m_sides)
       {
          if (!kv.second->Ready())
             continue;
+         if (kv.second->Right())
+         {
+            if (!right_encoded)
+            {
+               g722_encode(&m_state_right, right.data, samples.r, samples.SAMPLE_COUNT);
+               right_encoded = true;
+            }
+         }
+         else
+         {
+            if (!left_encoded)
+            {
+               g722_encode(&m_state_left, left.data, samples.l, samples.SAMPLE_COUNT);
+               left_encoded = true;
+            }
+         }
+
          Side::WriteStatus status = kv.second->WriteAudioFrame(kv.second->Right() ? right : left);
          if (status == Side::DISCONNECTED)
             m_reconnect_cb(kv.first);
@@ -239,39 +237,17 @@ void Device::AddSide(const std::string& path, const std::shared_ptr<Side>& side)
    g_info("Adding %s device to %s", side->Left() ? "left" : "right", Name().c_str());
    // Called from dbus thread, needs to hold pw lock while modifying m_sides.
    auto lock = pw::Thread::Get()->Lock();
-
-   // If we bring in a new side, when the other side already has packets
-   // queued up, then we want to drain the buffer so that it is easier for
-   // the sides to synchronize when the audio resumes
-   m_skip_packets = 0;
-
-   m_sides.emplace_back(path, side);
-   if (m_state == CONNECTED || m_state == PAUSED || m_state == STREAMING)
+   if (m_state == STREAMING)
    {
-      g_info("   Stream already running. Connecting new device.");
-      // side->UpdateConnectionParameters(0x10);
-      if (!side->Connect())
-      {
-         g_error("Failed to connect to %s", side->Description().c_str());
-         return;
-      }
-      // side->UpdateConnectionParameters(0x10); // Ditto.
+      Stop();
 
-      if (m_state == PAUSED || m_state == STREAMING)
-      {
-         bool otherstate = false;
-         for (auto& kv: m_sides)
-         {
-            if (side == kv.second) continue;
-            otherstate |= kv.second->Ready();
-         }
-         side->Start(otherstate);
-      }
-      for (auto& s: m_sides)
-      {
-         if (s.second != side)
-            s.second->UpdateOtherConnected(true);
-      }
+      // side->UpdateConnectionParameters(0x10);
+      if (side->Connect())
+         m_sides.emplace_back(path, side);
+      else
+         g_error("Failed to connect to %s", side->Description().c_str());
+
+      Start();
    }
 }
 
