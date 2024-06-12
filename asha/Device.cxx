@@ -256,6 +256,7 @@ void Device::AddSide(const std::string& path, const std::shared_ptr<Side>& side)
 bool Device::RemoveSide(const std::string& path)
 {
    // Called from dbus thread, needs to hold pw lock while modifying m_sides.
+   auto lock = pw::Thread::Get()->Lock();
    auto it = m_sides.begin();
    for (; it != m_sides.end(); ++it)
    {
@@ -276,7 +277,8 @@ bool Device::RemoveSide(const std::string& path)
 // Called when an asha bluetooth device is removed.
 bool Device::Reconnect(const std::string& path)
 {
-   // Called from dbus thread,
+   // Called from dbus thread
+   auto lock = pw::Thread::Get()->Lock();
    auto it = m_sides.begin();
    for (; it != m_sides.end(); ++it)
    {
