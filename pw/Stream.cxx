@@ -114,7 +114,8 @@ Stream::Stream(
       spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat, &m_info)
    };
    int flags = PW_STREAM_FLAG_AUTOCONNECT
-             | PW_STREAM_FLAG_MAP_BUFFERS;
+             | PW_STREAM_FLAG_MAP_BUFFERS
+             | PW_STREAM_FLAG_RT_PROCESS; // This doesn't mean realtime processing, it means do this on pipewire's thread instead of ours.
    int res = pw_stream_connect(m_stream, SPA_DIRECTION_INPUT, PW_ID_ANY, (pw_stream_flags)flags, params, 1);
    if (res < 0)
    {
