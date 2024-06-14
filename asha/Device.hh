@@ -38,7 +38,7 @@ public:
    size_t Occupancy() const;
    size_t OccupancyHigh() const;
    size_t RingDropped() const;
-   size_t FailedWrites() const;
+   size_t Retries() const;
 
 protected:
    // These will be called by the asha management singleton. (main thread)
@@ -51,7 +51,7 @@ protected:
    void Disconnect();
    void Start();
    void Stop();
-   bool SendAudio(const RawS16& samples);
+   bool SendAudio(const RawS16& samples, bool& left_success, bool& right_success);
    void SetStreamVolume(bool left, int8_t v);
    void SetDeviceVolume(bool left, int8_t v);
 
