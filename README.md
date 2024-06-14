@@ -1,15 +1,15 @@
-# Asha Pipewire Sink
-A sample asha audio implementation designed to work with pipewire and bluez.
+# ASHA (Audio Streaming for Hearing Aids) Pipewire Sink
+A sample ASHA implementation designed to work with pipewire and bluez.
 
 This project mostly follows the [Hearing Aid Audio Support Using Bluetooth LE](https://source.android.com/docs/core/connect/bluetooth/asha) document created by Google. Note that the specification varies in minor ways from the actual implementation used in the android source code.
 
-This project will recognize asha-compatible hearing devices that have been connected via bluetooth, and it will create virtual pipewire sinks that the user can select to stream audio to the hearing devices.
+This project will recognize ASHA-compatible hearing devices that have been connected via bluetooth, and it will create virtual pipewire sinks that the user can select to stream audio to the hearing devices.
 
 ## Caveats
-### Asha Audio is dead. Long live Asha Audio
-Android's ASHA Hearing Aid Audio Support has been superceded by Bluetooth LE audio. Bluez already supports LE Audio, and I rather suspect that future hearing devices will no longer support the older asha protocol.
+### ASHA is dead. Long live ASHA
+Android's ASHA has been superceded by Bluetooth LE audio. Bluez already supports LE Audio, and I rather suspect that future hearing devices will no longer support the older ASHA protocol.
 However: 
-- There are a large number of existing devices that use ASHA audio. Additionally, some of the newest releases are still ASHA-only. Since these devices tend to be very expensive, they have an extremely long replacement cycle. I suspect that many of these devices will be around for at least another ten years.
+- There are a large number of existing devices that use ASHA. Additionally, some of the newest releases are still ASHA-only. Since these devices tend to be very expensive, they have an extremely long replacement cycle. I suspect that many of these devices will be around for at least another ten years.
 - LE Audio-enabled hearing devices are dual mode, meaning they can use either ASHA or LE Audio. This dual functionality has proven useful since LE Audio implementation by manufacturers has been problematic so far.
 
 
@@ -19,10 +19,10 @@ If you have the ability to use LE Audio, then you should definitely prefer it ov
 - Your devices can operate in hands-free mode, functioning as both receivers and input microphones (a feature not available with ASHA).
 - LE Audio utilizes a vastly improved audio codec called LC3, replacing the outdated G.722 codec. While this upgrade is promising in theory, hearing devices are limited by the capabilities of their receivers, restricting their output to 8-12kHz. Consequently, there are improvements in sound quality, albeit marginal.
 
-However, if your hearing devices only support ASHA audio, then read on.
+However, if your hearing devices only support ASHA, then read on.
 
 ### Difficult setup
-The ASHA audio spec relies on the central manipulating the stream properties to match what the hearing device expects, but bluez is designed to allow the peripheral to set those properties itself (spoiler alert, they don't). In order to get a good listening experience, you will have to manually configure the bluetooth service and the bluetooth kernel module to set those properties yourself.
+The ASHA spec relies on the central manipulating the stream properties to match what the hearing device expects, but bluez is designed to allow the peripheral to set those properties itself (spoiler alert, they don't). In order to get a good listening experience, you will have to manually configure the bluetooth service and the bluetooth kernel module to set those properties yourself.
 
 ### Alternatives are coming
 There is at least one effort (see @ford-prefect's [branch here](https://github.com/asymptotic-io/bluez/tree/asha-support), along with the [patch set here](https://patchwork.kernel.org/project/bluetooth/list/?series=855408) and the [discussions here](https://github.com/bluez/bluez/pull/836)), to integrate ASHA support into bluez, which also will require Linux kernel changes. I am fully looking forward to throwing away my code and using integrated support instead, but I don't expect it to land into mainstream stable Linux distributions for many years.
@@ -34,7 +34,7 @@ You will need at least a bluetooth 5.0 adapter. I recommend 5.2 if you can get i
 Bluetooth adapters vary a lot in quality and compatibilty. I have tested this on an ASUS BT-500 usb adaptor and on an Intel AX200 wifi/bluetooth adapter. The ASUS device claimed 2M PHY and DLE support, but was still only able to stream to one hearing aid reliably. btmon captures showed that it was only sending 27 bytes of data at a time, apparently not using the DLE support. The Intel device was able to work reliably for both devices, but only after manually enabling 2M PHY.
 
 ### Enable LE credit based flow control.
-The ASHA audio spec requires LE credit based flow control, which is turned off by default in the Linux bluetooth kernel module. This can be turned on using the `enable_ecred` module paramter. On my system, I have created this file:
+The ASHA spec requires LE credit based flow control, which is turned off by default in the Linux bluetooth kernel module. This can be turned on using the `enable_ecred` module paramter. On my system, I have created this file:
 
 **/etc/modprobe.d/bluetooth_asha.conf**
 ```
@@ -43,7 +43,7 @@ options bluetooth enable_ecred=1
 After adding this file, you will want to reload the bluetooth module. The easiest way is probably just to reboot your system.
 
 ### Change the default connection interval
-The ASHA audio spec requires the central to set the connection interval to match the data transfer rate. Supposedly this is flexible, but I have only ever gotten a 20ms transfer rate to work on my device. Your results may vary. The default interval set by bluez is 30ms, but this can be adjusted by editing the bluetooth configuration. These configuration items will already already be present, but they are commented out, and have the wrong values. Note that these values are set in units of 1.25ms, so 20 / 1.25 = 16.
+The ASHA spec requires the central to set the connection interval to match the data transfer rate. Supposedly this is flexible, but I have only ever gotten a 20ms transfer rate to work on my device. Your results may vary. The default interval set by bluez is 30ms, but this can be adjusted by editing the bluetooth configuration. These configuration items will already already be present, but they are commented out, and have the wrong values. Note that these values are set in units of 1.25ms, so 20 / 1.25 = 16.
 
 **/etc/bluetooth/main.conf**
 ```
