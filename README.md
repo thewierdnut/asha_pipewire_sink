@@ -25,7 +25,7 @@ However, if your hearing devices only support ASHA, then read on.
 The ASHA spec relies on the central manipulating the stream properties to match what the hearing device expects, but bluez is designed to allow the peripheral to set those properties itself (spoiler alert, they don't). In order to get a good listening experience, you will have to manually configure the bluetooth service and the bluetooth kernel module to set those properties yourself.
 
 ### Alternatives are coming
-There is at least one effort (see @ford-prefect's [branch here](https://github.com/asymptotic-io/bluez/tree/asha-support), along with the [patch set here](https://patchwork.kernel.org/project/bluetooth/list/?series=855408) and the [discussions here](https://github.com/bluez/bluez/pull/836)), to integrate ASHA support into bluez, which also will require Linux kernel changes. I am fully looking forward to throwing away my code and using integrated support instead, but I don't expect it to land into mainstream stable Linux distributions for many years.
+There is at least one effort (see @ford-prefect's [branch here](https://github.com/asymptotic-io/bluez/tree/asha-support), along with the [discussions here](https://github.com/bluez/bluez/pull/836)) which recently got merged into BlueZ, to integrate ASHA support into system. I am fully looking forward to throwing away my code and using integrated support instead, but I don't expect it to land into mainstream stable Linux distributions for some time.
 
 ## Setup
 ### A compatible bluetooth adapter
