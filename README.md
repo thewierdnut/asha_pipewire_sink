@@ -8,7 +8,7 @@ This project will recognize ASHA-compatible hearing devices that have been conne
 ## Caveats
 ### ASHA is dead. Long live ASHA
 Android's ASHA has been superceded by Bluetooth LE audio. Bluez already supports LE Audio, and I rather suspect that future hearing devices will no longer support the older ASHA protocol.
-However: 
+However:
 - There are a large number of existing devices that use ASHA. Additionally, some of the newest releases are still ASHA-only. Since these devices tend to be very expensive, they have an extremely long replacement cycle. I suspect that many of these devices will be around for at least another ten years.
 - LE Audio-enabled hearing devices are dual mode, meaning they can use either ASHA or LE Audio. This dual functionality has proven useful since LE Audio implementation by manufacturers has been problematic so far.
 
@@ -25,7 +25,7 @@ However, if your hearing devices only support ASHA, then read on.
 The ASHA spec relies on the central manipulating the stream properties to match what the hearing device expects, but bluez is designed to allow the peripheral to set those properties itself (spoiler alert, they don't). In order to get a good listening experience, you will have to manually configure the bluetooth service and the bluetooth kernel module to set those properties yourself.
 
 ### Alternatives are coming
-There is at least one effort (see @ford-prefect's [branch here](https://github.com/asymptotic-io/bluez/tree/asha-support), along with the [discussions here](https://github.com/bluez/bluez/pull/836)) which recently got merged into BlueZ, to integrate ASHA support into system. I am fully looking forward to throwing away my code and using integrated support instead, but I don't expect it to land into mainstream stable Linux distributions for some time.
+There is at least one effort (see @ford-prefect's [branch here](https://github.com/asymptotic-io/bluez/tree/asha-support), along with the [discussions here](https://github.com/bluez/bluez/pull/836)) to implement ASHA which just recently got merged into BlueZ. I am fully looking forward to throwing away my code and using integrated support instead, but I don't expect it to land into mainstream stable Linux distributions for some time.
 
 ## Setup
 ### A compatible bluetooth adapter
