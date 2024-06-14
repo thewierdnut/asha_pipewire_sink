@@ -36,7 +36,7 @@ Bluetooth adapters vary a lot in quality and compatibilty. I have tested this on
 ### Enable LE credit based flow control.
 The ASHA audio spec requires LE credit based flow control, which is turned off by default in the Linux bluetooth kernel module. This can be turned on using the `enable_ecred` module paramter. On my system, I have created this file:
 
-**/etc/modprobe.d/bluetooth_ASHA.conf**
+**/etc/modprobe.d/bluetooth_asha.conf**
 ```
 options bluetooth enable_ecred=1
 ```
