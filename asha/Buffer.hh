@@ -157,8 +157,8 @@ protected:
                //       buffers and catch up.
                bool left = false;
                bool right = false;
-               if (!m_data_cb(SILENCE, left, right))
-                  ++m_retries;
+               m_data_cb(SILENCE, left, right);
+               // TODO: bother logging retries of silence?
                next += INTERVAL;
             }
          }
