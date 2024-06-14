@@ -6,7 +6,7 @@ This project mostly follows the [Hearing Aid Audio Support Using Bluetooth LE](h
 This project will recognize ASHA-compatible hearing devices that have been connected via bluetooth, and it will create virtual pipewire sinks that the user can select to stream audio to the hearing devices.
 
 ## Caveats
-### ASHA Audio is dead. Long live ASHA Audio
+### ASHA is dead. Long live ASHA
 Android's ASHA has been superceded by Bluetooth LE audio. Bluez already supports LE Audio, and I rather suspect that future hearing devices will no longer support the older ASHA protocol.
 However: 
 - There are a large number of existing devices that use ASHA audio. Additionally, some of the newest releases are still ASHA-only. Since these devices tend to be very expensive, they have an extremely long replacement cycle. I suspect that many of these devices will be around for at least another ten years.
