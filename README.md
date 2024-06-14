@@ -1,13 +1,13 @@
-# Asha Pipewire Sink
-A sample asha audio implementation designed to work with pipewire and bluez.
+# ASHA (Audio Streaming for Hearing Aids) Pipewire Sink
+A sample ASHA audio implementation designed to work with pipewire and bluez.
 
 This project mostly follows the [Hearing Aid Audio Support Using Bluetooth LE](https://source.android.com/docs/core/connect/bluetooth/asha) document created by Google. Note that the specification varies in minor ways from the actual implementation used in the android source code.
 
-This project will recognize asha-compatible hearing devices that have been connected via bluetooth, and it will create virtual pipewire sinks that the user can select to stream audio to the hearing devices.
+This project will recognize ASHA-compatible hearing devices that have been connected via bluetooth, and it will create virtual pipewire sinks that the user can select to stream audio to the hearing devices.
 
 ## Caveats
-### Asha Audio is dead. Long live Asha Audio
-Android's ASHA Hearing Aid Audio Support has been superceded by Bluetooth LE audio. Bluez already supports LE Audio, and I rather suspect that future hearing devices will no longer support the older asha protocol.
+### ASHA Audio is dead. Long live ASHA Audio
+Android's ASHA has been superceded by Bluetooth LE audio. Bluez already supports LE Audio, and I rather suspect that future hearing devices will no longer support the older ASHA protocol.
 However: 
 - There are a large number of existing devices that use ASHA audio. Additionally, some of the newest releases are still ASHA-only. Since these devices tend to be very expensive, they have an extremely long replacement cycle. I suspect that many of these devices will be around for at least another ten years.
 - LE Audio-enabled hearing devices are dual mode, meaning they can use either ASHA or LE Audio. This dual functionality has proven useful since LE Audio implementation by manufacturers has been problematic so far.
@@ -36,7 +36,7 @@ Bluetooth adapters vary a lot in quality and compatibilty. I have tested this on
 ### Enable LE credit based flow control.
 The ASHA audio spec requires LE credit based flow control, which is turned off by default in the Linux bluetooth kernel module. This can be turned on using the `enable_ecred` module paramter. On my system, I have created this file:
 
-**/etc/modprobe.d/bluetooth_asha.conf**
+**/etc/modprobe.d/bluetooth_ASHA.conf**
 ```
 options bluetooth enable_ecred=1
 ```
@@ -107,11 +107,11 @@ sudo btmgmt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT E
 ### Connect your hearing aids
 Connect your hearing aids using your standard bluetooth device dialog.
 ### Check your setup
-Run the `asha_connection_test` utility. This will check for common configuration mistakes and provide some debugging output that will be of use for troubleshooting.
+Run the `ASHA_connection_test` utility. This will check for common configuration mistakes and provide some debugging output that will be of use for troubleshooting.
 ### Run the pipewire sink
-Run `asha_pipewire_sink`. If you want to see lots of debug output, you can set the environment variable `G_MESSAGES_DEBUG=all`
+Run `ASHA_pipewire_sink`. If you want to see lots of debug output, you can set the environment variable `G_MESSAGES_DEBUG=all`
 
-Once `asha_pipewire_sink` detects your devices, it should create a new virtual pipewire sink that you can select as an audio device. You may have to select `Show Virtual Devices` in the KDE volume control or `Show: All Output Devices` in pavucontrol to see it.
+Once `ASHA_pipewire_sink` detects your devices, it should create a new virtual pipewire sink that you can select as an audio device. You may have to select `Show Virtual Devices` in the KDE volume control or `Show: All Output Devices` in pavucontrol to see it.
 
 If the audio is choppy, delayed, or sounds like it is shifting from ear to ear, then your adapter may not be able to keep up with the bandwidth requirements. Try connecting a single device and see if the quality improves.
 
