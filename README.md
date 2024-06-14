@@ -107,11 +107,11 @@ sudo btmgmt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT E
 ### Connect your hearing aids
 Connect your hearing aids using your standard bluetooth device dialog.
 ### Check your setup
-Run the `ASHA_connection_test` utility. This will check for common configuration mistakes and provide some debugging output that will be of use for troubleshooting.
+Run the `asha_connection_test` utility. This will check for common configuration mistakes and provide some debugging output that will be of use for troubleshooting.
 ### Run the pipewire sink
-Run `ASHA_pipewire_sink`. If you want to see lots of debug output, you can set the environment variable `G_MESSAGES_DEBUG=all`
+Run `asha_pipewire_sink`. If you want to see lots of debug output, you can set the environment variable `G_MESSAGES_DEBUG=all`
 
-Once `ASHA_pipewire_sink` detects your devices, it should create a new virtual pipewire sink that you can select as an audio device. You may have to select `Show Virtual Devices` in the KDE volume control or `Show: All Output Devices` in pavucontrol to see it.
+Once `asha_pipewire_sink` detects your devices, it should create a new virtual pipewire sink that you can select as an audio device. You may have to select `Show Virtual Devices` in the KDE volume control or `Show: All Output Devices` in pavucontrol to see it.
 
 If the audio is choppy, delayed, or sounds like it is shifting from ear to ear, then your adapter may not be able to keep up with the bandwidth requirements. Try connecting a single device and see if the quality improves.
 
