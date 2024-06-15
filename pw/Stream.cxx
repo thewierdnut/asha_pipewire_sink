@@ -101,10 +101,6 @@ Stream::Stream(
          default: break;
          }
       },
-      .control_info = [](void *data, uint32_t id, const struct pw_stream_control *control) {
-         printf("control_info(%s, %d)\n", control->name, control->n_values);
-         
-      },
       // .param_changed = [](void *data, uint32_t id, const struct spa_pod *param) { /* TODO: Define parameters, like volume? */ },
       .process = [](void* d) { ((Stream*)d)->Process(); }, // Called from its own thread.
    };

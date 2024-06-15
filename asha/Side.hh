@@ -38,7 +38,7 @@ public:
 
    // Is this necessary? android always marks this as unknown.
    enum PlaybackType { UNKNOWN = 0, RINGTONE = 1, PHONECALL = 2, MEDIA = 3 };
-   enum WriteStatus { WRITE_OK, DISCONNECTED, RETRY, NOT_READY, TRUNCATED, OVERSIZED };
+   enum WriteStatus { WRITE_OK, DISCONNECTED, BUFFER_FULL, NOT_READY, TRUNCATED, OVERSIZED };
 
    static std::shared_ptr<Side> CreateIfValid(const Bluetooth::BluezDevice& device);
 

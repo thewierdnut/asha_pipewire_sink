@@ -19,14 +19,6 @@ int Shutdown(void* ml)
 
 int main()
 {
-   // To set the Buffer thread to realtime priority:
-   // struct rlimit limit{150, 151}; // Don't consume more than 150us of cpu at a time
-   // if (setrlimit(RLIMIT_RTTIME, &limit) < 0)
-   //    g_info("Unable to set rlimit: %d %s", errno, strerror(errno));
-   // // Now that we have set a reasonable rlimit, we can call org.freedesktop.RealtimeKit1
-   // // /org/freedesktop/RealtimeKit1 org.freedesktop.RealtimeKit1 MakeThreadRealtimeWithPID(pid, tid, 1)
-   // // of the buffer thread, and it will give us SCHED_RR
-   
    g_info("Starting...");
    std::shared_ptr<GMainLoop> loop(g_main_loop_new(nullptr, true), g_main_loop_unref);
    auto quitter1 = g_unix_signal_add(SIGINT, Shutdown, loop.get());
@@ -34,28 +26,28 @@ int main()
    asha::Asha a;
 
    static size_t dropped = 0;
-   static size_t retries = 0;
+   static size_t failed = 0;
    static size_t silence = 0;
 
    guint stat_timer = g_timeout_add(1000, [](void* userdata)->gboolean {
       auto& a = *(asha::Asha*)userdata;
 
       size_t new_dropped = a.RingDropped();
-      size_t new_retries = a.Retries();
+      size_t new_failed = a.FailedWrites();
       size_t new_silence = a.Silence();
 
       std::cout << "Ring Occupancy: " << a.Occupancy()
                 << " High: " << a.OccupancyHigh()
                 << " Ring Dropped: " << new_dropped - dropped
                 << " Total: " << new_dropped
-                << " Retries: " << new_retries - retries
-                << " Total: " << new_retries
+                << " Adapter Dropped: " << new_failed - failed
+                << " Total: " << new_failed
                 << " Silence: " << new_silence - silence
                 << " Total: " << new_silence
                 << '\n';
 
       dropped = new_dropped;
-      retries = new_retries;
+      failed = new_failed;
       silence = new_silence;
       return G_SOURCE_CONTINUE;
    }, &a);

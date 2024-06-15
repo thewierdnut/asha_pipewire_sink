@@ -57,15 +57,11 @@ size_t Asha::RingDropped() const
 }
 
 
-size_t Asha::Retries() const
+size_t Asha::FailedWrites() const
 {
-   // Summing these together has the side effect that if we remove a side, then
-   // when we add them together as if they were a single counter, then we get
-   // a counter value that appears to have gone backwards, and can print
-   // garbage to the screen.
    size_t ret = 0;
    for (auto& kv: m_devices)
-      ret += kv.second->Retries();
+      ret += kv.second->FailedWrites();
    return ret;
 }
 

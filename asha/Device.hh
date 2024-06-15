@@ -38,7 +38,7 @@ public:
    size_t Occupancy() const;
    size_t OccupancyHigh() const;
    size_t RingDropped() const;
-   size_t Retries() const;
+   size_t FailedWrites() const;
    size_t Silence() const;
 
 protected:
@@ -52,7 +52,7 @@ protected:
    void Disconnect();
    void Start();
    void Stop();
-   bool SendAudio(const RawS16& samples, bool& left_success, bool& right_success);
+   bool SendAudio(const RawS16& samples);
    void SetStreamVolume(bool left, int8_t v);
    void SetDeviceVolume(bool left, int8_t v);
 

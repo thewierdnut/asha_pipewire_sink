@@ -12,7 +12,7 @@ Device::Device(uint64_t hisync, const std::string& name, const std::string& alia
    m_hisync{hisync},
    m_name{name},
    m_alias{alias},
-   m_buffer{new Buffer<RING_BUFFER_SIZE>([this](const RawS16& samples, bool& left, bool& right) { return SendAudio(samples, left, right); })},
+   m_buffer{new Buffer<RING_BUFFER_SIZE>([this](const RawS16& samples) { return SendAudio(samples); })},
    m_reconnect_cb{cb}
 {
    auto lock = pw::Thread::Get()->Lock();
@@ -61,9 +61,9 @@ size_t Device::RingDropped() const
 }
 
 
-size_t Device::Retries() const
+size_t Device::FailedWrites() const
 {
-   return m_buffer->Retries();
+   return m_buffer->FailedWrites();
 }
 
 
@@ -153,14 +153,21 @@ void Device::Stop()
 
 
 // Called whenever another 320 samples are ready.
-//
-// left_success will be set to true if we successfully handled the left side,
-// and right_success will be set to true if we successfully handled the right
-// side. If either is left set to false, then this function will be called
-// again with the same packet until the frame is handled, or the ring fills up
-// and the frame is discarded.
-bool Device::SendAudio(const RawS16& samples, bool& left_success, bool& right_success)
+bool Device::SendAudio(const RawS16& samples)
 {
+   bool ready = false;
+   for (auto& kv: m_sides)
+   {
+      if (kv.second->Ready())
+      {
+         ready = true;
+         break;
+      }
+   }
+   if (!ready)
+      return false;
+
+   bool success = false;
    if (m_state == STREAMING)
    {
       AudioPacket left;
@@ -172,14 +179,8 @@ bool Device::SendAudio(const RawS16& samples, bool& left_success, bool& right_su
 
       for (auto& kv: m_sides)
       {
-         auto& success = (kv.second->Left() ? left_success : right_success);
-         if (success)
-            continue; // We already sent this side.
          if (!kv.second->Ready())
-         {
-            success = true; // We will never send this side, so consume it.
             continue;
-         }
          if (kv.second->Right())
          {
             if (!right_encoded)
@@ -198,32 +199,15 @@ bool Device::SendAudio(const RawS16& samples, bool& left_success, bool& right_su
          }
 
          Side::WriteStatus status = kv.second->WriteAudioFrame(kv.second->Right() ? right : left);
-         if (status == Side::WRITE_OK)
-            success = true;
-         else if (status == Side::DISCONNECTED)
-         {
-            // TODO: Rethink this. We should probably stop and restart the stream.
+         if (status == Side::DISCONNECTED)
             m_reconnect_cb(kv.first);
-         }
-         else if (status == Side::RETRY)
-         {
-            // Leave status set to false. We will retry until the ring fills up.
-            // TODO: It would be nice if we didn't have to re-encode the buffer
-            //       when we got called a second time.
-         }
-         // else These are error conditions?
+         else
+            success |= status == Side::WRITE_OK;
       }
-      
-      if (left_success && right_success)
+      if (success)
          ++m_audio_seq;
    }
-   else
-   {
-      // Consume this event. We don't want to see it again.
-      left_success = right_success = true;
-      return false;
-   }
-   return true;
+   return success;
 }
 
 

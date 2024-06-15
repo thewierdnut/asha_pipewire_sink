@@ -29,7 +29,7 @@ class Buffer final
 public:
    static_assert((RING_SIZE & (RING_SIZE - 1)) == 0, "RING_SIZE must be a power of two");
    static_assert(RING_SIZE > 1, "RING_SIZE must be at least 2");
-   typedef std::function<bool(const RawS16&, bool&, bool&)> DataCallback;
+   typedef std::function<bool(const RawS16&)> DataCallback;
 
    Buffer(DataCallback cb):m_data_cb{cb}
    {
@@ -61,7 +61,7 @@ public:
    size_t Occupancy() const { return m_occupancy; }
    size_t OccupancyHigh() const { return m_high_occupancy; }
    size_t RingDropped() const { return m_buffer_full.load(std::memory_order_relaxed); }
-   size_t Retries() const { return m_retries; }
+   size_t FailedWrites() const { return m_failed_writes; }
    size_t Silence() const { return m_silence; }
 
    RawS16* NextBuffer()
@@ -75,7 +75,6 @@ public:
          m_buffer_full.fetch_add(1, std::memory_order_relaxed);
          return nullptr;
       }
-      m_send_status[idx & (RING_SIZE-1)] = std::make_pair(false, false);
       return &m_buffer[idx & (RING_SIZE-1)];
    }
 
@@ -116,30 +115,15 @@ protected:
             if (write > idx)
             {
                auto& buffer = m_buffer[idx & (RING_SIZE-1)];
-               auto& status = m_send_status[idx & (RING_SIZE-1)];
-               m_data_cb(buffer, status.first, status.second);
-
-               if (status.first && status.second)
-               {
-                  m_read.fetch_add(1, std::memory_order_relaxed);
-                  next += INTERVAL;
-               }
-               else
-               {
-                  // One or the other failed. Do not increment the read pointer
-                  // and re-attempt delivery quickly.
-                  if (!status.first)
-                     ++m_retries;
-                  if (!status.second)
-                     ++m_retries;
-                  next += INTERVAL / 20;
-               }
-
-               // If we ran out of space in the ring waiting for the hearing
-               // devices, then just clear out the ring to keep from
-               // accumulating too much latency.
+               if (!m_data_cb(buffer))
+                  ++m_failed_writes;
+               // TODO: if the send fails, should we drain the buffer, just to
+               //       improve the odds on catching back up?
+               ++m_read;
                if (m_occupancy == RING_SIZE)
                {
+                  // Our buffer is full, which means we have hit max latency.
+                  // Empty out the ring to try and keep up.
                   m_read = write;
                   m_buffer_full.fetch_add(RING_SIZE - 1, std::memory_order_relaxed);
                }
@@ -156,13 +140,11 @@ protected:
                //       overtaken pipewire, and it may be better to just skip
                //       the packet to allow the hearing devices to drain their
                //       buffers and catch up.
-               bool left = false;
-               bool right = false;
-               m_data_cb(SILENCE, left, right);
-               // TODO: bother logging retries of silence?
+               if (!m_data_cb(SILENCE))
+                  ++m_failed_writes;
                ++m_silence;
-               next += INTERVAL;
             }
+            next += INTERVAL;
          }
          else
          {
@@ -183,7 +165,7 @@ private:
    // Use padding to force reader/writer vars to be on their own cache lines.
    uint8_t m_padding0[64 - 4 * sizeof(size_t) - sizeof(std::atomic<size_t>)];
    std::atomic<size_t> m_read{};
-   size_t m_retries = 0;
+   size_t m_failed_writes = 0;
    size_t m_occupancy = 0;
    size_t m_high_occupancy = 0;
    size_t m_silence = 0;
@@ -196,7 +178,6 @@ private:
    // between a full ring and an empty ring. This means that technically we
    // only have room for RING_SIZE - 1 buffers.
    RawS16 m_buffer[RING_SIZE];
-   std::pair<bool, bool> m_send_status[RING_SIZE];
 };
 
 }
