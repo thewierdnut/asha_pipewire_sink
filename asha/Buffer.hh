@@ -62,6 +62,7 @@ public:
    size_t OccupancyHigh() const { return m_high_occupancy; }
    size_t RingDropped() const { return m_buffer_full.load(std::memory_order_relaxed); }
    size_t Retries() const { return m_retries; }
+   size_t Silence() const { return m_silence; }
 
    RawS16* NextBuffer()
    {
@@ -159,6 +160,7 @@ protected:
                bool right = false;
                m_data_cb(SILENCE, left, right);
                // TODO: bother logging retries of silence?
+               ++m_silence;
                next += INTERVAL;
             }
          }
@@ -179,11 +181,12 @@ private:
    std::thread m_thread;
 
    // Use padding to force reader/writer vars to be on their own cache lines.
-   uint8_t m_padding0[64 - 3 * sizeof(size_t) - sizeof(std::atomic<size_t>)];
+   uint8_t m_padding0[64 - 4 * sizeof(size_t) - sizeof(std::atomic<size_t>)];
    std::atomic<size_t> m_read{};
    size_t m_retries = 0;
    size_t m_occupancy = 0;
    size_t m_high_occupancy = 0;
+   size_t m_silence = 0;
    uint8_t m_padding1[64 - 2 * sizeof(std::atomic<size_t>)];
    std::atomic<size_t> m_write{};
    std::atomic<size_t> m_buffer_full{};

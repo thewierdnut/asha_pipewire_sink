@@ -39,6 +39,7 @@ public:
    size_t OccupancyHigh() const;
    size_t RingDropped() const;
    size_t Retries() const;
+   size_t Silence() const;
 
 protected:
    // These will be called by the asha management singleton. (main thread)

@@ -67,6 +67,12 @@ size_t Device::Retries() const
 }
 
 
+size_t Device::Silence() const
+{
+   return m_buffer->Silence();
+}
+
+
 // Called by pipewire when a node has been connected. (Since it is a stream
 // object, this will happen immediately, as it attaches a conversion node in
 // front of it).

@@ -35,12 +35,14 @@ int main()
 
    static size_t dropped = 0;
    static size_t retries = 0;
+   static size_t silence = 0;
 
-   guint stat_timer = g_timeout_add(10000, [](void* userdata)->gboolean {
+   guint stat_timer = g_timeout_add(1000, [](void* userdata)->gboolean {
       auto& a = *(asha::Asha*)userdata;
 
       size_t new_dropped = a.RingDropped();
       size_t new_retries = a.Retries();
+      size_t new_silence = a.Silence();
 
       std::cout << "Ring Occupancy: " << a.Occupancy()
                 << " High: " << a.OccupancyHigh()
@@ -48,10 +50,13 @@ int main()
                 << " Total: " << new_dropped
                 << " Retries: " << new_retries - retries
                 << " Total: " << new_retries
+                << " Silence: " << new_silence - silence
+                << " Total: " << new_silence
                 << '\n';
 
       dropped = new_dropped;
       retries = new_retries;
+      silence = new_silence;
       return G_SOURCE_CONTINUE;
    }, &a);
 

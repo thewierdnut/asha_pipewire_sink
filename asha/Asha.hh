@@ -32,6 +32,7 @@ public:
    size_t OccupancyHigh() const;
    size_t RingDropped() const;
    size_t Retries() const;
+   size_t Silence() const;
 
 protected:
    void OnAddDevice(const Bluetooth::BluezDevice& d);
