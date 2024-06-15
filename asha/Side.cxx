@@ -312,7 +312,7 @@ Side::WriteStatus Side::WriteAudioFrame(const AudioPacket& packet)
       }
       else if (err == EAGAIN || err == EWOULDBLOCK)
       {
-         g_warning("Dropping frame for %s", Description().c_str());
+         g_info("Dropping frame for %s", Description().c_str());
          ret = BUFFER_FULL;
       }
       else

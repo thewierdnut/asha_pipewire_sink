@@ -116,17 +116,25 @@ protected:
             {
                auto& buffer = m_buffer[idx & (RING_SIZE-1)];
                if (!m_data_cb(buffer))
+               {
                   ++m_failed_writes;
+                  // If we failed to send a packet, drop an extra from input
+                  if (write > idx + 1)
+                  {
+                     ++m_read;
+                     m_buffer_full.fetch_add(1, std::memory_order_relaxed);
+                  }
+               }
                // TODO: if the send fails, should we drain the buffer, just to
                //       improve the odds on catching back up?
                ++m_read;
-               if (m_occupancy == RING_SIZE)
-               {
-                  // Our buffer is full, which means we have hit max latency.
-                  // Empty out the ring to try and keep up.
-                  m_read = write;
-                  m_buffer_full.fetch_add(RING_SIZE - 1, std::memory_order_relaxed);
-               }
+               // if (m_occupancy == RING_SIZE)
+               // {
+               //    // Our buffer is full, which means we have hit max latency.
+               //    // Empty out the ring to try and keep up.
+               //    m_read = write;
+               //    m_buffer_full.fetch_add(RING_SIZE - 1, std::memory_order_relaxed);
+               // }
             }
             else
             {
