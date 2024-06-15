@@ -19,6 +19,8 @@ int Shutdown(void* ml)
 
 int main()
 {
+   setenv("G_MESSAGES_DEBUG", "all", false);
+
    g_info("Starting...");
    std::shared_ptr<GMainLoop> loop(g_main_loop_new(nullptr, true), g_main_loop_unref);
    auto quitter1 = g_unix_signal_add(SIGINT, Shutdown, loop.get());
