@@ -119,3 +119,8 @@ If the audio is choppy, delayed, or sounds like it is shifting from ear to ear, 
 Please use the issue reporter to let me know of your experiences, positive or negative, trying to get this to work. I would love to generate a compatibility table, and perhaps to troubleshoot and add support for additional devices.
 
 Please check [the wiki](https://github.com/thewierdnut/asha_pipewire_sink/wiki) for current testing status of various devices.
+
+## Known issues
+- stream is more stable (and disconnect less likely) when the hearing devices are connected prior to starting asha_pipewire stream or asha_stream_test
+- additionl simultaneously connected BT peripherals besides hearing devices will led to instability
+- switching app windows or opening sound panel might result in a glitchy stream
