@@ -38,6 +38,7 @@ Device::Device(uint64_t hisync, const std::string& name, const std::string& alia
 Device::~Device()
 {
    auto lock = pw::Thread::Get()->Lock();
+   m_buffer->Stop();
    m_stream.reset();
    m_sides.clear();
 }

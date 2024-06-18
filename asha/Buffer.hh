@@ -44,6 +44,7 @@ public:
    {
       if (!m_thread.joinable())
       {
+         m_startup = true;
          m_running = true;
          m_thread = std::thread(&Buffer::DeliveryThread, this);
       }
@@ -114,27 +115,44 @@ protected:
                m_high_occupancy = m_occupancy;
             if (write > idx)
             {
-               auto& buffer = m_buffer[idx & (RING_SIZE-1)];
-               if (!m_data_cb(buffer))
+               // Make sure we fill up our ring at least halfway before
+               // starting, so that we can fill the buffers on the hearing
+               // devices.
+               if (m_startup)
                {
-                  ++m_failed_writes;
-                  // If we failed to send a packet, drop an extra from input
-                  if (write > idx + 1)
+                  if (m_occupancy < RING_SIZE / 2)
+                     continue;
+                  m_startup = false;
+                  // Flush all available packets to start up.
+                  for (; idx < write; ++idx)
                   {
-                     ++m_read;
-                     m_buffer_full.fetch_add(1, std::memory_order_relaxed);
+                     auto& buffer = m_buffer[idx & (RING_SIZE-1)];
+                     if (!m_data_cb(buffer))
+                     {
+                        ++m_failed_writes;
+                        // If we failed to send a packet, drop an extra from input
+                        if (write > idx + 1)
+                           m_buffer_full.fetch_add(1, std::memory_order_relaxed);
+                        break;
+                     }
                   }
+                  m_read = idx;
                }
-               // TODO: if the send fails, should we drain the buffer, just to
-               //       improve the odds on catching back up?
-               ++m_read;
-               // if (m_occupancy == RING_SIZE)
-               // {
-               //    // Our buffer is full, which means we have hit max latency.
-               //    // Empty out the ring to try and keep up.
-               //    m_read = write;
-               //    m_buffer_full.fetch_add(RING_SIZE - 1, std::memory_order_relaxed);
-               // }
+               else
+               {
+                  auto& buffer = m_buffer[idx & (RING_SIZE-1)];
+                  if (!m_data_cb(buffer))
+                  {
+                     ++m_failed_writes;
+                     // If we failed to send a packet, drop an extra from input
+                     if (write > idx + 1)
+                     {
+                        ++m_read;
+                        m_buffer_full.fetch_add(1, std::memory_order_relaxed);
+                     }
+                  }
+                  ++m_read;
+               }
             }
             else
             {
@@ -166,7 +184,7 @@ protected:
 
 private:
    DataCallback m_data_cb;
-
+   bool m_startup = true;
    volatile bool m_running = false;
    std::thread m_thread;
 
