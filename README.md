@@ -61,7 +61,7 @@ sudo systemctl restart bluetooth
 ```
 
 ### Enable 2M PHY (optional)
-With 1M PHY (the default), I can only reliably stream audio to a single hearing aid. In order to utilize both hearing aids, I have to manually enable 2M PHY. I haven't been able to find a configuration option or a bluez interface that will do this, so I have had to resort to using btmgmt commands to do this. You can check your existing enabled PHYs with `btmgmt phy`. If the `Configurable phys` contains `LE2MTX` and `LE2MRX`, but the `Selected phys` does not, then you can copy your existing `Selected phys`, and add the values `LE2MTX LE2MRX` to it. On my system, that looks like this:
+If you have a kernel older than 6.8, 2M PHY will not be automatically enabled. With 1M PHY (the default), I can only reliably stream audio to a single hearing aid. In order to utilize both hearing aids, I have to manually enable 2M PHY. I haven't been able to find a configuration option or a bluez interface that will do this, so I have had to resort to using btmgmt commands to do this. You can check your existing enabled PHYs with `btmgmt phy`. If the `Configurable phys` contains `LE2MTX` and `LE2MRX`, but the `Selected phys` does not, then you can copy your existing `Selected phys`, and add the values `LE2MTX LE2MRX` to it. On my system, that looks like this:
 
 ```sh
 # Check the existing phys
