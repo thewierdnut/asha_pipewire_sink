@@ -157,11 +157,9 @@ void Asha::OnReconnectDevice(const std::string& path)
    Defer([=]() {
       for (auto it = m_devices.begin(); it != m_devices.end(); ++it)
       {
-         // TODO: If this is the correct device, but the reconnect failed, we
-         //       should remove this device. We should probably re-add it if it
-         //       becomes available in the future, but how do we detect that?
-         if (it->second->Reconnect(local_path))
-            break;
+         it->second->Stop();
+         usleep(10000);
+         it->second->Start();
       }
    });
 }
