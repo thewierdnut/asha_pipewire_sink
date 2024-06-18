@@ -158,20 +158,6 @@ protected:
       g_info("       mode:   %u%s", info.link_mode, link_mode_str(info.link_mode).c_str());
    }
 
-   void CheckHciFeatures(RawHci& hci)
-   {
-      // This just returns all zeroes for me.
-      g_info("    Hci Features:");
-      bool more = true;
-      for (unsigned i = 0; i < 256 && more; ++i)
-      {
-         uint64_t feature_mask = 0;
-         hci.ReadExtendedFeatures(i, &feature_mask, &more);
-         if (feature_mask)
-            g_info("       [%u] %lu", i, feature_mask);
-      }
-   }
-
    void CheckHciLq(RawHci& hci)
    {
       uint8_t quality = 0;

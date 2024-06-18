@@ -21,8 +21,6 @@ public:
    uint16_t ConnectionHandle() const { return m_connection_id; }
    uint16_t DeviceId() const { return m_device_id; }
 
-   //uint64_t ReadSupportedFeatures();
-   bool ReadExtendedFeatures(uint8_t page, uint64_t* features, bool* more);
    bool ReadLinkQuality(uint8_t* quality);
    bool ReadRssi(int8_t* rssi);
    struct SystemConfig {
@@ -35,7 +33,7 @@ public:
    bool ReadSysConfig(SystemConfig& config);
 
    // Set Phy2M. Requires CAP_NET_RAW access.
-   bool SendPhy2M() noexcept;
+   bool SendPhy(bool phy1m, bool phy2m) noexcept;
    // Set DataLen. Requires CAP_NET_RAW access.
    bool SendDataLen(uint16_t size, uint16_t txtime);
    // Set Connection interval. Requires CAP_NET_RAW access.

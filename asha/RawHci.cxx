@@ -139,28 +139,6 @@ RawHci::~RawHci() noexcept
       close(m_sock);
 }
 
-
-bool RawHci::ReadExtendedFeatures(uint8_t page, uint64_t* features, bool* more)
-{
-   if (!features) return false;
-   struct {
-      uint8_t status;
-      uint8_t page;
-      uint8_t max_page;
-      uint32_t features;
-   } __attribute__((packed)) response{};
-
-   if (SendCommand(OGF_INFO_PARAM, OCF_READ_LOCAL_EXT_FEATURES, page, &response) && response.status == 0)
-   {
-      if (more)
-         *more = page < response.max_page;
-      *features = response.features;
-      return true;
-   }
-   return false;
-}
-
-
 bool RawHci::ReadLinkQuality(uint8_t* quality)
 {
    if (!quality) return false;
@@ -342,7 +320,7 @@ bool RawHci::ReadSysConfig(SystemConfig& config)
 
 
 
-bool RawHci::SendPhy2M() noexcept
+bool RawHci::SendPhy(bool phy1m, bool phy2m) noexcept
 {
    struct {
       uint8_t  phy_flags = 0;
@@ -350,6 +328,16 @@ bool RawHci::SendPhy2M() noexcept
       uint8_t  phy_rx = 0x02; // Prefer to receive LE 2M
       uint16_t coding = 0x0000;
    } __attribute__((packed)) msg{};
+   if (phy1m)
+   {
+      msg.phy_tx |= 1;
+      msg.phy_rx |= 1;
+   }
+   if (phy2m)
+   {
+      msg.phy_tx |= 2;
+      msg.phy_rx |= 2;
+   }
    struct {
       uint8_t status;
       uint16_t handle;
@@ -542,8 +530,8 @@ bool RawHci::SendAndWaitForResponse(const RequestT& request, ResponseT* response
                            //       expect does. This code will break if we
                            //       try to use a command that doesn't have
                            //       this.
-                           // if (response->handle == m_connection_id)
-                           //    return true;
+                           if (response->handle == m_connection_id)
+                              return true;
                            // else this is somebody else's response. ignore it.
                         }
                         else
@@ -586,8 +574,8 @@ bool RawHci::SendAndWaitForResponse(const RequestT& request, ResponseT* response
                            //       handle, but every response we expect
                            //       does. This code will break if we try to
                            //       use a command that doesn't have this.
-                           // if (response->handle == m_connection_id)
-                           //    return true;
+                           if (response->handle == m_connection_id)
+                              return true;
                            // else This is somebody else's response. Ignore it.
                         }
                         else
@@ -614,8 +602,6 @@ bool RawHci::SendAndWaitForResponse(const RequestT& request, ResponseT* response
             }
          }
       }
-
-      return true;
    }
    return false;
 }

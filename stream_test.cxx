@@ -41,7 +41,8 @@ std::vector<uint8_t> ReadFile(const std::string& path)
 class StreamTest
 {
 public:
-   StreamTest(const std::string& left_path, const std::string& right_path):
+   StreamTest(const std::string& left_path, const std::string& right_path, uint16_t ce_length, bool phy1m, bool phy2m):
+      m_ce_length{ce_length}, m_phy1m{phy1m}, m_phy2m{phy2m},
       m_data_left{left_path.empty() ? std::vector<uint8_t>() : ReadFile(left_path)},
       m_data_right{right_path.empty() ? std::vector<uint8_t>() : ReadFile(right_path)},
       m_b(
@@ -140,19 +141,36 @@ protected:
             return;
          }
          std::cout << "    Connected: " << (side->Connect() ? "true": "false") << '\n';
-         CheckPHY(side);
+
          usleep(10000);
+
+         RawHci raw_hci(side->Mac(), side->Sock());
+         if (m_phy1m || m_phy2m)
+         {
+            if (raw_hci.SendPhy(m_phy1m, m_phy2m))
+            {
+               std::cout << "    Sent phy1m: " << (m_phy1m ? "true" : "false")
+                         << " phy2m: " << (m_phy2m ? "true" : "false") << "\n";
+            }
+            else
+            {
+               std::cout << "    Unable to set enabled PHYs (needs CAP_NET_RAW to work)\n";
+            }
+         }
+         else
+            CheckPHY(side);
+
+         
          side->SetStreamVolume(m_volume);
 
-         // RawHci raw_hci(side->Mac(), side->Sock());
-         // if (raw_hci.SendConnectionUpdate(8, 8, 10, 100))
-         // {
-         //    std::cout << "    Switched to connection interval 8 (10 ms)\n";
-         // }
-         // else
-         // {
-         //    std::cout << "    Unable to set connection interval (needs CAP_NET_RAW for this to work)\n";
-         // }
+         
+         if (m_ce_length)
+         {
+            if (raw_hci.SendConnectionUpdate(16, 16, 10, 100, m_ce_length, m_ce_length))
+               std::cout << "    Switched to connection interval 16 ce length " << m_ce_length << "\n";
+            else
+               std::cout << "    Unable to set connection interval (needs CAP_NET_RAW for this to work)\n";
+         }
 
          Stop();
 
@@ -382,6 +400,9 @@ protected:
    }
 
 private:
+   uint16_t m_ce_length = 0;
+   bool m_phy1m = false;
+   bool m_phy2m = false;
    std::vector<uint8_t> m_data_left;
    std::vector<uint8_t> m_data_right;
    size_t m_data_offset = 0;
@@ -405,8 +426,11 @@ void HelpAndExit(const std::string& path)
              << "Arguments:\n"
              << "   --left  <raw g722 file>     File to feed to left or mono devices\n"
              << "   --right <raw g722 file>     File to feed to right devices\n"
-             << "   --algorithm (deadline|fixed|poll) Streaming algorithm to use [default: deadline]\n"
-             << "   --volume [-128 to 0]        Set the volume [default: -64]\n";
+             << "   --volume [-128 to 0]        Set the volume [default: -64]\n"
+             << "   --algorithm (deadline|fixed|poll) Streaming algorithm to use [default: fixed]\n"
+             << "   --celength                  Attempt to set the ce length [CAP_NET_RAW required]\n"
+             << "   --phy1m                     Attempt to enable 1M PHY [CAP_NET_RAW required]\n"
+             << "   --phy2m                     Attempt to enable 2M PHY [CAP_NET_RAW required]\n";
    exit(1);
 }
 
@@ -417,8 +441,12 @@ int main(int argc, char** argv)
 
    std::string left_path;
    std::string right_path;
-   std::string algorithm = "deadline";
+   std::string algorithm = "fixed";
    int8_t volume = -64;
+   
+   uint16_t ce_length = 0;
+   bool phy1m = false;
+   bool phy2m = false;
 
    for (int i = 1; i < argc; ++i)
    {
@@ -435,6 +463,12 @@ int main(int argc, char** argv)
          if (v > 0)    v = 0;
          volume = v;
       }
+      else if (0 == strcmp(argv[i], "--celength") && i + 1 < argc)
+         ce_length = atoi(argv[++i]);
+      else if (0 == strcmp(argv[i], "--phy2m"))
+         phy2m = true;
+      else if (0 == strcmp(argv[i], "--phy1m"))
+         phy1m = true;
       else
       {
          std::cout << "Don't understand argument\n";
@@ -458,7 +492,7 @@ int main(int argc, char** argv)
       HelpAndExit(argv[0]);
    }
 
-   StreamTest c(left_path, right_path);
+   StreamTest c(left_path, right_path, ce_length, phy1m, phy2m);
    c.SetVolume(volume);
 
    if (!c.Start(algorithm))
