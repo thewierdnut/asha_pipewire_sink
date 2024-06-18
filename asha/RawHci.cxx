@@ -12,6 +12,22 @@
 #include <sys/socket.h>
 #include <poll.h>
 
+// What other sources of information can we access?
+// Non-root access:
+//    management commands from https://elixir.bootlin.com/linux/v6.1/source/net/bluetooth/mgmt.c#L185
+//       These might be bad to use, as they are not exposed via constants and
+//       may change in the future. btmgmr uses magic values to access them.
+//       MGMT_OP_READ_INDEX_LIST,            // Read a list of devices
+//       MGMT_OP_READ_INFO,                  // Gets a mgmt_rp_read_info struct, which includes current and supported settings. This can tell us LE is supported.
+//       MGMT_OP_READ_UNCONF_INDEX_LIST,     // Gets a list of controllers that are unconfigured.
+//       MGMT_OP_READ_CONFIG_INFO,           // Returns mgmt_rp_read_config_info struct. Nothing useful for us.
+//       MGMT_OP_READ_EXT_INDEX_LIST,        // Returns a slightly more detailed list of devices.
+//       MGMT_OP_READ_EXT_INFO,              // Returns a mgmt_rp_read_ext_info struct
+//       MGMT_OP_READ_CONTROLLER_CAP,        // Reads a set of controller capabilities
+//       MGMT_OP_READ_EXP_FEATURES_INFO,     // Read a set of list of 16 bit uuid features.
+//       MGMT_OP_READ_DEF_SYSTEM_CONFIG,     // Returns the system defaults (mostly the values in /etc/bluetooth/main.conf)
+//       MGMT_OP_READ_DEF_RUNTIME_CONFIG,    // seems to just return an empty response.
+
 namespace
 {
    void DumpHex(uint8_t* p, size_t len)
@@ -25,16 +41,6 @@ namespace
       std::cout.flags(oldflags);
    }
 }
-
-
-
-// 0x04 0x0001  V1.1 	V1.2 	Read_Local_Version_Information
-// 0x04 0x0002  — 	   V1.2 	Read_Local_Supported_Commands
-// 0x04 0x0003  V1.1 	V1.2 	Read_Local_Supported_Features
-// 0x04 0x0004  — 	   V1.2 	Read_Local_ Extended_Features
-// 0x04 0x0005  V1.1 	V1.2 	Read_Buffer_Size
-// 0x04 0x0007  V1.1 	—     Read_Country_Code
-// 0x04 0x0009  V1.1 	V1.2 	Read_BD_ADDR
 
 
 RawHci::RawHci(const std::string& mac, int connection_sock) noexcept
@@ -201,6 +207,139 @@ bool RawHci::ReadRssi(int8_t* rssi)
    }
    return false;
 }
+
+
+bool RawHci::ReadSysConfig(SystemConfig& config)
+{
+   // Root should not be needed for this one.
+   config = SystemConfig{};
+
+   // struct mgmt_hdr from mgmt.h
+   struct mgmt_hdr {
+      uint16_t opcode;
+      uint16_t index;
+      uint16_t len;
+   } __attribute__((packed));
+   struct mgmt_status
+   {
+      uint16_t opcode;
+      uint8_t status;
+   } __attribute__((packed));
+   struct mgmt_hdr hdr{};
+   hdr.opcode = htobs(0x004b); // MGMT_OP_READ_DEF_SYSTEM_CONFIG
+   hdr.index = htobs(m_device_id == INVALID_ID ? 0 : m_device_id);
+   hdr.len = htobs(0);
+
+   // Can't use normal raw socket for this one.
+   int sock = socket(PF_BLUETOOTH, SOCK_RAW, BTPROTO_HCI);
+   if (sock < 0)
+   {
+      std::cout << "Unable to create management socket\n";
+      return false;
+   }
+   struct sockaddr_hci addr{};
+   addr.hci_family = htobs(AF_BLUETOOTH);
+   addr.hci_dev = htobs(HCI_DEV_NONE);
+   addr.hci_channel = htobs(HCI_CHANNEL_CONTROL);
+   if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+   {
+      std::cout << "Unable to bind to control channel\n";
+      close(sock);
+      return false;
+   }
+
+   if (sizeof(hdr) != send(sock, &hdr, sizeof(hdr), 0))
+   {
+      std::cout << "Unable to write management request: " << strerror(errno) << '\n';
+      close(sock);
+      return false;
+   }
+
+   while(true)
+   {
+      uint8_t buffer[65536];
+      auto bytes_read = read(sock, buffer, sizeof(buffer));
+      
+      if (bytes_read < 0)
+      {
+         std::cout << "Unable to read management response\n";
+         break;
+      }
+
+      if (bytes_read < sizeof(mgmt_hdr))
+      {
+         std::cout << "Truncated management header in response\n";
+         break;
+      }
+      mgmt_hdr* resp = (mgmt_hdr*)buffer;
+
+      if (bytes_read < sizeof(mgmt_hdr) + btohs(resp->len))
+      {
+         std::cout << "Truncated management packet in response\n";
+         break;
+      }
+      auto length = btohs(resp->len);
+      auto event = btohs(resp->opcode);
+      if (event == 0x0001) // MGMT_EV_CMD_COMPLETE
+      {
+         if (length < sizeof(mgmt_hdr) + sizeof(mgmt_status))
+         {
+            std::cout << "Truncated management complete\n";
+            break;
+         }
+         auto status = (mgmt_status*)(resp + 1);
+         if (btohs(status->opcode) == 0x004b)
+         {
+            length -= sizeof(mgmt_hdr) + sizeof(mgmt_status);
+            uint8_t* p = buffer + sizeof(mgmt_hdr) + sizeof(mgmt_status);
+            while (length > sizeof(uint16_t) + sizeof(uint8_t))
+            {
+               uint16_t type = btohs(*(uint16_t*)p);
+               length -= sizeof(uint16_t); p += sizeof(uint16_t);
+               uint8_t datalen = *p;
+               length -= sizeof(uint8_t); p += sizeof(uint8_t);
+               if (datalen > length)
+                  break;
+               config.raw[type].assign(p, p + datalen);
+               switch(type)
+               {
+               case 0x0017: // min_conn_interval;
+                  if (datalen == 2)
+                     config.min_conn_interval = btohs(*(uint16_t*)p);
+                  break;
+               case 0x0018: // max_conn_interval;
+                  if (datalen == 2)
+                     config.max_conn_interval = btohs(*(uint16_t*)p);
+                  break;
+               }
+               length -= datalen; p += datalen;
+            }
+            // DumpHex(buffer + sizeof(mgmt_hdr) + sizeof(mgmt_status), length - sizeof(mgmt_hdr) + sizeof(mgmt_status));
+            break;
+         }
+      }
+      else if (event == 0x0002) // MGMT_EV_CMD_STATUS
+      {
+         // if (length < sizeof(mgmt_hdr) + sizeof(mgmt_status))
+         // {
+         //    std::cout << "Truncated management status\n";
+         //    break;
+         // }
+         // auto status = (mgmt_status*)(resp + 1);
+         // // Not sure we actually care?
+         // if (btohs(status->opcode) == 0x004b)
+         //    std::cout << "Read status: " << (unsigned)status->status << '\n';
+      }
+      else
+      {
+         // ?
+      }
+   }
+
+   close(sock);
+   return true;
+}
+
 
 
 bool RawHci::SendPhy2M() noexcept

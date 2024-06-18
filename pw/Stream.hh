@@ -8,6 +8,7 @@
 #include <memory>
 #include <functional>
 #include <string>
+#include <vector>
 
 struct spa_hook;
 struct pw_core;

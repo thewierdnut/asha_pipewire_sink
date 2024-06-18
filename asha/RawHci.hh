@@ -4,6 +4,7 @@
 #include <bluetooth/hci.h>
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,7 @@
 class RawHci final
 {
 public:
+   RawHci() noexcept {}
    RawHci(const std::string& mac, int sock = -1) noexcept;
    ~RawHci() noexcept;
 
@@ -23,6 +25,14 @@ public:
    bool ReadExtendedFeatures(uint8_t page, uint64_t* features, bool* more);
    bool ReadLinkQuality(uint8_t* quality);
    bool ReadRssi(int8_t* rssi);
+   struct SystemConfig {
+      // refer to src/adapter.c in bluez, the load_*_defaults functions
+      uint16_t min_conn_interval;      // value 17
+      uint16_t max_conn_interval;      // value 18
+
+      std::map<uint16_t, std::vector<uint8_t>> raw;
+   };
+   bool ReadSysConfig(SystemConfig& config);
 
    // Set Phy2M. Requires CAP_NET_RAW access.
    bool SendPhy2M() noexcept;

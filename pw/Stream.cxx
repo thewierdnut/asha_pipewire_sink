@@ -140,72 +140,58 @@ void Stream::Process()
 {
    // Called from a new thread that seems created just for the stream
    // Called from pipewire thread in m_thread, lock already held.
-   struct pw_buffer* in = pw_stream_dequeue_buffer(m_stream);
-   if (!in)
+   struct pw_buffer* in;
+   while ((in = pw_stream_dequeue_buffer(m_stream)))
    {
-      printf("Why was process called with no buffers?\n");
-      return;
-   }
-
-   uint32_t left = in->buffer->n_datas >= 1 ? in->buffer->datas[0].chunk->size : 0;
-   uint32_t right = in->buffer->n_datas >= 2 ? in->buffer->datas[1].chunk->size : 0;
-   // printf("Received %d channels of sound data (%d, %d). \n", in->buffer->n_datas, left/2, right/2);
-   assert(left == right);
-   if (left == right)
-   {
-      auto l = in->buffer->datas[0];
-      auto loffs = std::min(l.chunk->offset, l.maxsize);
-      auto lsize = std::min(l.chunk->size, l.maxsize - loffs);
-      auto r = in->buffer->datas[1];
-      auto roffs = std::min(r.chunk->offset, r.maxsize);
-      auto rsize = std::min(r.chunk->size, r.maxsize - roffs);
-      assert(lsize == rsize);
-      if (lsize == rsize)
+      uint32_t left = in->buffer->n_datas >= 1 ? in->buffer->datas[0].chunk->size : 0;
+      uint32_t right = in->buffer->n_datas >= 2 ? in->buffer->datas[1].chunk->size : 0;
+      // printf("Received %d channels of sound data (%d, %d). \n", in->buffer->n_datas, left/2, right/2);
+      assert(left == right);
+      if (left == right)
       {
-         size_t samples = left / 2;
-         size_t offset = 0;
-         do
+         auto l = in->buffer->datas[0];
+         auto loffs = std::min(l.chunk->offset, l.maxsize);
+         auto lsize = std::min(l.chunk->size, l.maxsize - loffs);
+         auto r = in->buffer->datas[1];
+         auto roffs = std::min(r.chunk->offset, r.maxsize);
+         auto rsize = std::min(r.chunk->size, r.maxsize - roffs);
+         assert(lsize == rsize);
+         if (lsize == rsize)
          {
-            size_t samples_needed = RawS16::SAMPLE_COUNT - m_samples_used;
-            size_t samples_to_copy = std::min(samples_needed, samples);
-            memcpy(m_samples.l + m_samples_used, SPA_PTROFF(l.data, loffs, int16_t) + offset, samples_to_copy * 2);
-            memcpy(m_samples.r + m_samples_used, SPA_PTROFF(r.data, loffs, int16_t) + offset, samples_to_copy * 2);
-            m_samples_used += samples_to_copy;
-            samples -= samples_to_copy;
-            offset += samples_to_copy;
-            if (m_samples_used >= RawS16::SAMPLE_COUNT)
+            size_t samples = left / 2;
+            size_t offset = 0;
+            do
             {
-               m_data_cb(m_samples);
-               m_samples_used = 0;
+               size_t samples_needed = RawS16::SAMPLE_COUNT - m_samples_used;
+               size_t samples_to_copy = std::min(samples_needed, samples);
+               memcpy(m_samples.l + m_samples_used, SPA_PTROFF(l.data, loffs, int16_t) + offset, samples_to_copy * 2);
+               memcpy(m_samples.r + m_samples_used, SPA_PTROFF(r.data, loffs, int16_t) + offset, samples_to_copy * 2);
+               m_samples_used += samples_to_copy;
+               samples -= samples_to_copy;
+               offset += samples_to_copy;
+               if (m_samples_used >= RawS16::SAMPLE_COUNT)
+               {
+                  m_data_cb(m_samples);
+                  m_samples_used = 0;
+               }
+               else
+               {
+                  break;
+               }
             }
-            else
-            {
-               break;
-            }
+            while (samples > 0);
          }
-         while (samples > 0);
+         else
+         {
+            printf("lsize was not rsize... dropping audio frame");
+         }
       }
       else
       {
-         printf("lsize was not rsize... dropping audio frame");
+         printf("Different number of samples from left and right. Dropping audio frame.");
       }
+
+      // Place the buffer back so that it can be reused.
+      pw_stream_queue_buffer(m_stream, in);
    }
-   else
-   {
-      printf("Different number of samples from left and right. Dropping audio frame.");
-   }
-
-   // m_count += right / 2;
-   // double t = now();
-   // if (t - m_prev_stamp > 10)
-   // {
-   //    double hz = m_count / (t - m_prev_stamp);
-   //    printf("Receiving data at %u hz\n", (unsigned)hz);
-   //    m_prev_stamp = t;
-   //    m_count = 0;
-   // }
-
-
-   // Place the buffer back so that it can be reused.
-   pw_stream_queue_buffer(m_stream, in);
 }

@@ -68,6 +68,7 @@ protected:
          // Raw socket ioctls
          RawHci hci_connection(side->Mac(), side->Sock());
          CheckHciConnInfo(hci_connection);
+         CheckCfgDefaults(hci_connection);
       }
       else
       {
@@ -190,6 +191,17 @@ protected:
    }
 
 
+   void CheckCfgDefaults(RawHci& hci)
+   {
+      RawHci::SystemConfig config;
+      if (hci.ReadSysConfig(config))
+      {
+         g_info("    min_connection_interval: %hu", config.min_conn_interval);
+         g_info("    max_connection_interval: %hu", config.max_conn_interval);
+      }
+   }
+
+
    void CheckMTU(const std::shared_ptr<asha::Side>& device)
    {
       uint16_t imtu = 0;
@@ -216,12 +228,20 @@ protected:
    void CheckPHY(const std::shared_ptr<asha::Side>& device)
    {
       uint32_t phys = 0;
-      socklen_t size = sizeof(phys);
-      int err = getsockopt(device->Sock(), SOL_BLUETOOTH, BT_PHY, &phys, &size);
-      if (err < 0)
+      for (int i = 0; i < 20; ++i)
       {
-         g_warning("    Error retrieving BT_PHY: %s %u", strerror(-err), -err);
-         return;
+         socklen_t size = sizeof(phys);
+         int err = getsockopt(device->Sock(), SOL_BLUETOOTH, BT_PHY, &phys, &size);
+         if (err < 0)
+         {
+            std::cout << "    Error retrieving BT_PHY: " << strerror(-err) << " (" <<  -err << ")\n";
+            return;
+         }
+
+         if (phys & BT_PHY_LE_2M_TX)
+            break;
+
+         usleep(10000);
       }
 
       std::string phystr = std::to_string(phys);

@@ -1,5 +1,6 @@
 #include "Asha.hh"
 #include "Bluetooth.hh"
+#include "RawHci.hh"
 #include "Side.hh"
 
 #include <glib.h>
@@ -15,6 +16,32 @@ namespace
 
 Asha::Asha()
 {
+   RawHci hci;
+   RawHci::SystemConfig config;
+   // Rather than reading this config from the file, pull it out of the kernel,
+   // so that we know what is actually set.
+   if (hci.ReadSysConfig(config))
+   {
+      if (config.max_conn_interval != config.min_conn_interval)
+      {
+         g_error("Your configured MinConnectionInterval (%hu) and MaxConnectionInterval (%hu) are not the same. "
+                 "You need to adjust your /etc/bluetooth/main.conf file and restart the bluetooth service.",
+                 config.min_conn_interval, config.max_conn_interval);
+      }
+      else if (config.min_conn_interval > 16)
+      {
+         g_error("Your configured MinConnectionInterval and MaxConnectionInterval are not set to 16. "
+                 "Please fix your /etc/bluetooth/main.conf and restart the bluetooth service.");
+      }
+      else if (config.min_conn_interval < 16)
+      {
+         g_info("The connection interval is set to %hu, and is unlikely to be supported. "
+                "If you encounter distorted audio or an unstable connection, it is probably "
+                "best to set it back to 16", config.min_conn_interval);
+      }
+   }
+
+
    m_b.reset(new Bluetooth(
       [this](const Bluetooth::BluezDevice& d) { OnAddDevice(d); },
       [this](const std::string& path) { OnRemoveDevice(path); }

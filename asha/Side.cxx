@@ -198,6 +198,35 @@ bool Side::Reconnect()
       return false;
    }
 
+   // TODO: Bah. This still keeps posting false positives.
+   bool phy_2m_enabled = false;
+   uint32_t phys = 0;
+   socklen_t size = sizeof(phys);
+   // Give it 2000 ms to finish phy negotiation.
+   for (size_t i = 0; i < 100 && !phy_2m_enabled; ++i)
+   {
+      if (getsockopt(m_sock, SOL_BLUETOOTH, BT_PHY, &phys, &size) >= 0)
+      {
+         if (phys & BT_PHY_LE_2M_TX)
+         {
+            phy_2m_enabled = true;
+            break;
+         }
+      }
+      else
+         break; // No point in polling. Something else is broken
+      g_usleep(20000);
+   }
+   if (!phy_2m_enabled)
+   {
+      g_info("2M PHY not enabled");
+      g_info("        Unless you enable LE_2M_TX, don't expect to be able to stream to more than one device.");
+      g_info("        You can use `btmgmt phy` to check the supported phy's, and enable additional phy's by running a command like");
+      g_info("           btmgmt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX");
+      g_info("        and then disconnecting and reconnecting your hearing devices.");
+      g_info("        Note that some devices and adapters don't support 2M PHY's, despite advertising otherwise");
+   }
+
    return true;
 }
 
@@ -233,36 +262,6 @@ bool Side::DisableStatusNotifications()
 
 bool Side::Start(bool otherstate)
 {
-   uint32_t phys = 0;
-   socklen_t size = sizeof(phys);
-   
-   // TODO: Bah. This still keeps posting false positives.
-   // bool phy_2m_enabled = false;
-   // // Give it 200 ms to finish phy negotiation.
-   // for (size_t i = 0; i < 10 && !phy_2m_enabled; ++i)
-   // {
-   //    if (getsockopt(m_sock, SOL_BLUETOOTH, BT_PHY, &phys, &size) >= 0)
-   //    {
-   //       if (phys & BT_PHY_LE_2M_TX)
-   //       {
-   //          phy_2m_enabled = true;
-   //          break;
-   //       }
-   //    }
-   //    else
-   //       break; // No point in polling. Something else is broken
-   //    g_usleep(20000);
-   // }
-   // if (!phy_2m_enabled)
-   // {
-   //    g_warning("2M PHY not enabled");
-   //    g_info("        Unless you enable LE_2M_TX, don't expect to be able to stream to more than one device.");
-   //    g_info("        You can use `btmgmt phy` to check the supported phy's, and enable additional phy's by running a command like");
-   //    g_info("           btmgmt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX");
-   //    g_info("        and then disconnecting and reconnecting your hearing devices.");
-   //    g_info("        Note that some devices and adapters don't support 2M PHY's, despite advertising otherwise");
-   // }
-
    static constexpr uint8_t G722_16KHZ = 1;
    m_ready_to_receive_audio = false;
    m_next_status_fn = [this](Status s) {
@@ -285,17 +284,6 @@ Side::WriteStatus Side::WriteAudioFrame(const AudioPacket& packet)
    WriteStatus ret = NOT_READY;
    if (m_sock != -1 && m_ready_to_receive_audio)
    {
-      // ++m_packet_count;
-      // double elapsed = g_timer_elapsed(m_timer.get(), nullptr);
-      // if (elapsed > 10)
-      // {
-      //    // Each packet should be 320 samples.
-      //    double rate = 320 * m_packet_count / elapsed;
-      //    g_info("Receiving data at %u hz", (unsigned)rate);
-      //    m_packet_count = 0;
-      //    g_timer_start(m_timer.get());
-      // }
-
       int bytes_sent = send(m_sock, &packet, sizeof(packet), MSG_DONTWAIT);
       int err = errno;
       if (bytes_sent == sizeof(packet))

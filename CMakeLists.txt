@@ -32,6 +32,7 @@ add_executable(asha_stream_test
    asha/Characteristic.cxx
    asha/Side.cxx
    asha/GVariantDump.cxx
+   asha/RawHci.cxx
 
    stream_test.cxx
 )
@@ -45,6 +46,7 @@ add_executable(asha_pipewire_sink
    asha/Device.cxx
    asha/GVariantDump.cxx
    asha/Side.cxx
+   asha/RawHci.cxx
 
    g722/g722_encode.c
 
@@ -55,4 +57,3 @@ add_executable(asha_pipewire_sink
 )
 target_link_libraries(asha_pipewire_sink PkgConfig::GLIB PkgConfig::PIPEWIRE)
 
-add_executable(encode_test g722/encode_test.cxx g722/g722_encode.c)

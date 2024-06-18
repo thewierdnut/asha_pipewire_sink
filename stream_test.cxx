@@ -1,4 +1,5 @@
 #include "asha/Bluetooth.hh"
+#include "asha/RawHci.hh"
 #include "asha/Side.hh"
 
 #include <poll.h>
@@ -142,6 +143,17 @@ protected:
          CheckPHY(side);
          usleep(10000);
          side->SetStreamVolume(m_volume);
+
+         // RawHci raw_hci(side->Mac(), side->Sock());
+         // if (raw_hci.SendConnectionUpdate(8, 8, 10, 100))
+         // {
+         //    std::cout << "    Switched to connection interval 8 (10 ms)\n";
+         // }
+         // else
+         // {
+         //    std::cout << "    Unable to set connection interval (needs CAP_NET_RAW for this to work)\n";
+         // }
+
          Stop();
 
          m_devices[d.path] = side;
@@ -269,7 +281,7 @@ protected:
             packet.seq = sequence++;
             for (auto& kv: m_devices)
             {
-               memcpy(packet.data, (kv.second->Left() ? m_data_left.data() : m_data_right.data()) + m_data_offset, 160);
+               memcpy(packet.data, (kv.second->Left() ? m_data_left.data() : m_data_right.data()) + m_data_offset, sizeof(packet.data));
                kv.second->WriteAudioFrame(packet);
 
             }
@@ -334,12 +346,20 @@ protected:
    void CheckPHY(const std::shared_ptr<asha::Side>& device)
    {
       uint32_t phys = 0;
-      socklen_t size = sizeof(phys);
-      int err = getsockopt(device->Sock(), SOL_BLUETOOTH, BT_PHY, &phys, &size);
-      if (err < 0)
+      for (int i = 0; i < 60; ++i)
       {
-         std::cout << "    Error retrieving BT_PHY: " << strerror(-err) << " (" <<  -err << ")\n";
-         return;
+         socklen_t size = sizeof(phys);
+         int err = getsockopt(device->Sock(), SOL_BLUETOOTH, BT_PHY, &phys, &size);
+         if (err < 0)
+         {
+            std::cout << "    Error retrieving BT_PHY: " << strerror(-err) << " (" <<  -err << ")\n";
+            return;
+         }
+
+         if (phys & BT_PHY_LE_2M_TX)
+            break;
+
+         usleep(20000);
       }
 
       std::string phystr = std::to_string(phys);
