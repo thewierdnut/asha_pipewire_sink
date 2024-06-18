@@ -379,15 +379,6 @@ protected:
       if (phys & BT_PHY_LE_CODED_TX) phystr += " LE_CODED_TX";
       if (phys & BT_PHY_LE_CODED_RX) phystr += " LE_CODED_RX";
       std::cout << "    PHY:    " << phystr.c_str() << '\n';
-      
-      if ((phys & BT_PHY_LE_2M_TX) == 0)
-      {
-         std::cout << "        Unless you enable LE_2M_TX, don't expect to be able to stream to more than one device.\n";
-         std::cout << "        You can use `btmgmt phy` to check the supported phy's, and enable additional phy's by running a command like\n";
-         std::cout << "           btmgmt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX\n";
-         std::cout << "        and then disconnecting and reconnecting your hearing devices.\n";
-         std::cout << "        Note that some devices and adapters don't support 2M PHY's, despite advertising otherwise\n";
-      }
    }
 
 private:

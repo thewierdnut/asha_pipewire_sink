@@ -396,7 +396,7 @@ bool RawHci::SendConnectionUpdate(uint16_t min_interval, uint16_t max_interval, 
       uint16_t max_interval;
       uint16_t latency;
       uint16_t timeout;
-      uint16_t min_ce;
+      uint16_t min_ce;   // units of .625 ms
       uint16_t max_ce;
    } __attribute__((packed)) msg{
       min_interval, max_interval,
