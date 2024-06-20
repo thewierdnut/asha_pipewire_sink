@@ -107,16 +107,17 @@ Stream::Stream(
 
    pw_stream_add_listener(m_stream, &m_stream_listener, &stream_events, this);
 
-   spa_pod_builder b;
-   uint8_t buffer[1024];
-	spa_pod_builder_init(&b, buffer, sizeof(buffer));
-	const struct spa_pod *params[] = {
-      spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat, &m_info)
+   spa_pod_builder format_builder;
+   uint8_t format_buffer[1024];
+	spa_pod_builder_init(&format_builder, format_buffer, sizeof(format_buffer));
+	std::vector<const struct spa_pod *> params{
+      spa_format_audio_raw_build(&format_builder, SPA_PARAM_EnumFormat, &m_info)
    };
+   
    int flags = PW_STREAM_FLAG_AUTOCONNECT
              | PW_STREAM_FLAG_MAP_BUFFERS
              | PW_STREAM_FLAG_RT_PROCESS; // This doesn't mean realtime processing, it means do this on pipewire's thread instead of ours.
-   int res = pw_stream_connect(m_stream, SPA_DIRECTION_INPUT, PW_ID_ANY, (pw_stream_flags)flags, params, 1);
+   int res = pw_stream_connect(m_stream, SPA_DIRECTION_INPUT, PW_ID_ANY, (pw_stream_flags)flags, params.data(), params.size());
    if (res < 0)
    {
       printf("pw_stream_connect returned %d (%s)\n", res, strerror(-res));

@@ -63,7 +63,7 @@ private:
    enum {DISCONNECTED, CONNECTED, PAUSED, STREAMING} m_state = DISCONNECTED;
 
 
-   static constexpr size_t RING_BUFFER_SIZE = 8;
+   static constexpr size_t RING_BUFFER_SIZE = 4;
    std::shared_ptr<Buffer<RING_BUFFER_SIZE>> m_buffer;
    g722_encode_state_t m_state_left{};
    g722_encode_state_t m_state_right{};

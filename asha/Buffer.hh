@@ -59,6 +59,11 @@ public:
       }
    }
 
+   void FlushAndReset()
+   {
+      m_startup = true;
+   }
+
    size_t Occupancy() const { return m_occupancy; }
    size_t OccupancyHigh() const { return m_high_occupancy; }
    size_t RingDropped() const { return m_buffer_full.load(std::memory_order_relaxed); }
@@ -120,7 +125,7 @@ protected:
                // devices.
                if (m_startup)
                {
-                  if (m_occupancy < RING_SIZE / 2)
+                  if (m_occupancy < RING_SIZE)
                      continue;
                   m_startup = false;
                   // Flush all available packets to start up.

@@ -20,7 +20,7 @@ Device::Device(uint64_t hisync, const std::string& name, const std::string& alia
       name, alias,
       [this]() { Connect(); Start(); },
       [this]() { Stop(); Disconnect(); },
-      [this]() {  },
+      [this]() { /* m_buffer->FlushAndReset(); */ },
       [this]() {  },
       [this](const RawS16& samples) {
          // TODO: redesign this api so that we can retrieve the pointer and

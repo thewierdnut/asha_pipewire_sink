@@ -57,3 +57,6 @@ add_executable(asha_pipewire_sink
 )
 target_link_libraries(asha_pipewire_sink PkgConfig::GLIB PkgConfig::PIPEWIRE)
 
+
+# add_executable(test_sink pw/export-sink.cxx)
+# target_link_libraries(test_sink PkgConfig::PIPEWIRE)
