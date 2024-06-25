@@ -4,6 +4,8 @@
 #include "../pw/Stream.hh"
 #include "../pw/Thread.hh"
 #include "Side.hh"
+
+#include <poll.h>
 #include <glib.h>
 
 using namespace asha;
@@ -18,10 +20,10 @@ Device::Device(uint64_t hisync, const std::string& name, const std::string& alia
    auto lock = pw::Thread::Get()->Lock();
    m_stream = std::make_shared<pw::Stream>(
       name, alias,
-      [this]() { Connect(); Start(); },
-      [this]() { Stop(); Disconnect(); },
-      [this]() { /* m_buffer->FlushAndReset(); */ },
-      [this]() {  },
+      [this]() { Connect(); },
+      [this]() { Disconnect(); },
+      [this]() { Start(); /* m_buffer->FlushAndReset(); */ },
+      [this]() { Stop(); },
       [this](const RawS16& samples) {
          // TODO: redesign this api so that we can retrieve the pointer and
          //       have the pipewire stream fill it in.
@@ -81,15 +83,6 @@ void Device::Connect()
 {
    // Already holding pipewire thread lock.
    m_state = CONNECTED;
-   for (auto& kv: m_sides)
-   {
-      auto& side = kv.second;
-      if (!side->Connect())
-      {
-         g_error("Failed to connect to %s", side->Description().c_str());
-         continue;
-      }
-   }
 }
 
 
@@ -100,14 +93,6 @@ void Device::Disconnect()
    // Already holding pipewire thread lock.
    m_state = DISCONNECTED;
    Stop();
-   for (auto& kv: m_sides)
-   {
-      if (!kv.second->Disconnect())
-      {
-         g_error("Failed to disconnect from %s", kv.second->Description().c_str());
-         continue;
-      }
-   }
 }
 
 
@@ -120,23 +105,27 @@ void Device::Start()
    // just means "Use all 8 bits of each byte".
    g722_encode_init(&m_state_left, 64000, G722_PACKED);
    g722_encode_init(&m_state_right, 64000, G722_PACKED);
+   m_buffer->Start();
 
    // Asha docs says otherstate here is "whether the other side of the
    // binaural devices is connected", but the android source checks if
    // the other side is *streaming* (ie connected, and already started
-   m_buffer->Start();
-
    m_state = STREAMING;
    m_audio_seq = 0;
    for (auto& kv: m_sides)
    {
-      bool otherstate = false;
-      for (auto& okv: m_sides)
-      {
-         if (kv.second == okv.second) continue;
-         otherstate |= okv.second->Ready();
-      }
-      kv.second->Start(m_sides.size() > 1);
+      // This is what android does...
+      // bool otherstate = false;
+      // for (auto& okv: m_sides)
+      // {
+      //    if (kv.second == okv.second) continue;
+      //    otherstate |= okv.second->Ready();
+      // }
+      // This seems more stable. The hearing devices seem to fight for control
+      // of the stream for a moment if you don't just tell them beforehand that
+      // they are both present.
+      bool otherstate = m_sides.size() > 1;
+      kv.second->Start(otherstate);
    }
 }
 
@@ -156,17 +145,12 @@ void Device::Stop()
 // Called whenever another 320 samples are ready.
 bool Device::SendAudio(const RawS16& samples)
 {
-   bool ready = false;
+   bool ready = true;
    for (auto& kv: m_sides)
    {
-      if (kv.second->Ready())
-      {
-         ready = true;
-         break;
-      }
+      if (!kv.second->Ready())
+         return false;
    }
-   if (!ready)
-      return false;
 
    bool success = false;
    if (m_state == STREAMING)
@@ -178,10 +162,22 @@ bool Device::SendAudio(const RawS16& samples)
       bool left_encoded = false;
       bool right_encoded = false;
 
+      // TODO: Also check for closed socket?
+      struct pollfd fds[m_sides.size()];
+      for (size_t i = 0; i < m_sides.size(); ++i)
+      {
+         fds[i] = pollfd{
+            .fd = m_sides[i].second->Sock(),
+            .events = POLLOUT
+         };
+      }
+      if (m_sides.size() != poll(fds, m_sides.size(), 0))
+      {
+         return false;
+      }
+
       for (auto& kv: m_sides)
       {
-         if (!kv.second->Ready())
-            continue;
          if (kv.second->Right())
          {
             if (!right_encoded)
@@ -200,10 +196,28 @@ bool Device::SendAudio(const RawS16& samples)
          }
 
          Side::WriteStatus status = kv.second->WriteAudioFrame(kv.second->Right() ? right : left);
-         if (status == Side::DISCONNECTED)
-            m_reconnect_cb(kv.first);
-         else
-            success |= status == Side::WRITE_OK;
+         switch(status)
+         {
+         case Side::WRITE_OK:
+            success = true;
+            break;
+         case Side::DISCONNECTED:
+            g_info("WriteAudioFrame returned DISCONNECTED");
+            // m_reconnect_cb(kv.first);
+            break;
+         case Side::BUFFER_FULL:
+            g_info("WriteAudioFrame returned BUFFER_FULL");
+            break;
+         case Side::NOT_READY:
+            g_info("WriteAudioFrame returned NOT_READY");
+            break;
+         case Side::TRUNCATED:
+            g_info("WriteAudioFrame returned TRUNCATED");
+            break;
+         case Side::OVERSIZED:
+            g_info("WriteAudioFrame returned OVERSIZED");
+            break;
+         }
       }
       if (success)
          ++m_audio_seq;
@@ -242,20 +256,28 @@ void Device::SetDeviceVolume(bool left, int8_t v)
 void Device::AddSide(const std::string& path, const std::shared_ptr<Side>& side)
 {
    g_info("Adding %s device to %s", side->Left() ? "left" : "right", Name().c_str());
+   side->SubscribeExtra();
+
    // Called from dbus thread, needs to hold pw lock while modifying m_sides.
    auto lock = pw::Thread::Get()->Lock();
+   auto old_state = m_state;
    if (m_state == STREAMING)
-   {
       Stop();
 
-      // side->UpdateConnectionParameters(0x10);
-      if (side->Connect())
-         m_sides.emplace_back(path, side);
-      else
-         g_error("Failed to connect to %s", side->Description().c_str());
-
-      Start();
+   if (side->Connect())
+   {
+      for (auto& kv: m_sides)
+      {
+         kv.second->UpdateConnectionParameters(16); // TODO: get interval from the side that just connected and verify that they are the smame.
+         kv.second->UpdateOtherConnected(true);
+      }
+      m_sides.emplace_back(path, side);
    }
+   else
+      g_error("Failed to connect to %s", side->Description().c_str());
+
+   if (old_state == STREAMING)
+      Start();
 }
 
 
@@ -284,6 +306,7 @@ bool Device::RemoveSide(const std::string& path)
 // Called when an asha bluetooth device is removed.
 bool Device::Reconnect(const std::string& path)
 {
+   return false;
    // Called from dbus thread
    auto lock = pw::Thread::Get()->Lock();
    auto it = m_sides.begin();

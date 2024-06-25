@@ -163,16 +163,29 @@ protected:
          
          side->SetStreamVolume(m_volume);
 
-         
+         bool set_ce_length = false;
          if (m_ce_length)
          {
             if (raw_hci.SendConnectionUpdate(16, 16, 10, 100, m_ce_length, m_ce_length))
+            {
                std::cout << "    Switched to connection interval 16 ce length " << m_ce_length << "\n";
+               side->UpdateConnectionParameters(16);
+               set_ce_length = true;
+            }
             else
                std::cout << "    Unable to set connection interval (needs CAP_NET_RAW for this to work)\n";
          }
+         if (!set_ce_length)
+         {
+            RawHci::SystemConfig config;
+            if (raw_hci.ReadSysConfig(config))
+               side->UpdateConnectionParameters(config.min_conn_interval);
+         }
 
          Stop();
+
+         for (auto& others: m_devices)
+            others.second->UpdateOtherConnected(true);
 
          m_devices[d.path] = side;
 
@@ -194,6 +207,10 @@ protected:
          std::cout << "Removing " << it->second->Description().c_str() << '\n';
          Stop();
          m_devices.erase(it);
+
+         for (auto& others: m_devices)
+            others.second->UpdateOtherConnected(false);
+
          if (!m_devices.empty())
          {
             Start(m_algorithm);
@@ -269,6 +286,8 @@ protected:
 
    void FeederThreadFixed()
    {
+      usleep(250000);
+
       bool other = false;
       for (auto& kv: m_devices)
       {
@@ -281,6 +300,9 @@ protected:
       double next = start + 10;
       double pos = start ;
       uint8_t sequence = 0;
+
+      bool left_first = true;
+      bool right_first = true;
       while (m_running)
       {
          usleep(2000);
@@ -300,8 +322,12 @@ protected:
             for (auto& kv: m_devices)
             {
                memcpy(packet.data, (kv.second->Left() ? m_data_left.data() : m_data_right.data()) + m_data_offset, sizeof(packet.data));
-               kv.second->WriteAudioFrame(packet);
-
+               bool& first = kv.second->Left() ? left_first : right_first;
+               if ((asha::Side::WRITE_OK == kv.second->WriteAudioFrame(packet)) && first)
+               {
+                  std::cout << (kv.second->Left() ? "left" : "right") << " first sequence: " << (unsigned)packet.seq << '\n';
+                  first = false;
+               }
             }
             m_data_offset += 160;
             if (!m_data_left.empty() && m_data_offset + 160 > m_data_left.size())
@@ -494,6 +520,7 @@ int main(int argc, char** argv)
 
    StreamTest c(left_path, right_path, ce_length, phy1m, phy2m);
    c.SetVolume(volume);
+
 
    if (!c.Start(algorithm))
    {

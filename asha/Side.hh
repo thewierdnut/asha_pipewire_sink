@@ -51,6 +51,7 @@ public:
    const Properties& GetProperties() const { return m_properties; }
    bool Right() const { return m_properties.capabilities & 0x01; }
    bool Left() const { return !Right(); }
+   void SubscribeExtra(/* callbacks? */);
 
    bool Disconnect();
    bool Connect();
@@ -61,6 +62,7 @@ public:
    bool Start(bool otherstate);
    bool Stop();
    WriteStatus WriteAudioFrame(const AudioPacket& packet);
+   void ReadFromAudioSocket();
    bool UpdateOtherConnected(bool connected);
    bool UpdateConnectionParameters(uint8_t interval);
 
@@ -76,6 +78,9 @@ private:
    bool DisableStatusNotifications();
 
    void OnStatusNotify(const std::vector<uint8_t>& data);
+   void OnHAStatus(const std::vector<uint8_t>& data);
+   void OnBattery(uint8_t percent);
+   void OnExternalVolume(uint8_t value);
 
    struct
    {
@@ -84,6 +89,12 @@ private:
       Characteristic status;
       Characteristic volume;
       Characteristic le_psm_out;
+
+      // Not part of asha, but useful.
+      Characteristic ha_status;
+      Characteristic external_volume;
+      Characteristic battery_10;
+      Characteristic battery_100;
    } m_char;
 
    std::string m_name;
@@ -92,7 +103,7 @@ private:
    Properties m_properties{};
 
    uint16_t m_psm_id = 0;
-   int8_t m_volume = -20;
+   int8_t m_volume = 0;
    int m_sock = -1;
 
    bool m_status_notify_enabled = false;

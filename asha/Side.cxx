@@ -1,13 +1,18 @@
 #include "Side.hh"
 
+#include "HexDump.hh"
+#include "RawHci.hh"
+
 #include <cassert>
 #include <cstring>
+#include <sstream>
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/l2cap.h>
 #include <glib-2.0/glib.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
 
 
 using namespace asha;
@@ -20,6 +25,11 @@ constexpr char ASHA_AUDIO_CONTROL_POINT[]  = "f0d4de7e-4a88-476c-9d9f-1937b0996c
 constexpr char ASHA_AUDIO_STATUS[]         = "38663f1a-e711-4cac-b641-326b56404837";
 constexpr char ASHA_VOLUME[]               = "00e4ca9e-ab14-41e4-8823-f9e70c7e91df";
 constexpr char ASHA_LE_PSM_OUT[]           = "2d410339-82b6-42aa-b34e-e2e01df8cc1a";
+
+constexpr char HA_STATUS[]                 = "38278651-76d7-4dee-83d8-894f3fa6bb99";
+constexpr char EXTERNAL_VOLUME[]           = "f3f594f9-e210-48f3-85e2-4b0cf235a9d3";
+constexpr char BATTERY_10[]                = "24e1dff3-ae90-41bf-bfbd-2cf8df42bf87";
+constexpr char BATTERY_100[]               = "60fb6208-9b02-468e-aba8-b702dd6f543a";
 
 namespace Control
 {
@@ -49,6 +59,10 @@ std::shared_ptr<Side> Side::CreateIfValid(const Bluetooth::BluezDevice& device)
       else if (c.UUID() == ASHA_AUDIO_STATUS)         side->m_char.status = c;
       else if (c.UUID() == ASHA_VOLUME)               side->m_char.volume = c;
       else if (c.UUID() == ASHA_LE_PSM_OUT)           side->m_char.le_psm_out = c;
+      else if (c.UUID() == HA_STATUS)                 side->m_char.ha_status = c;
+      else if (c.UUID() == EXTERNAL_VOLUME)           side->m_char.external_volume = c;
+      else if (c.UUID() == BATTERY_10)                side->m_char.battery_10 = c;
+      else if (c.UUID() == BATTERY_100)               side->m_char.battery_100 = c;
    }
    
    if (side->m_char.properties && side->m_char.audio_control &&
@@ -102,6 +116,23 @@ bool Side::ReadProperties()
    memcpy(&m_properties, result.data(), sizeof(m_properties));
    return true;
 }
+
+
+void Side::SubscribeExtra(/* callbacks? */)
+{
+   if (m_char.ha_status)
+      m_char.ha_status.Notify([this](const std::vector<uint8_t> &bytes) { OnHAStatus(bytes); });
+
+   if (m_char.battery_100)
+      m_char.battery_100.Notify([this](const std::vector<uint8_t> &bytes) { if(!bytes.empty()) OnBattery(bytes[0]); });
+   else if (m_char.battery_10)
+      m_char.battery_100.Notify([this](const std::vector<uint8_t> &bytes) { if(!bytes.empty()) OnBattery(bytes[0] * 10); });
+
+   if (m_char.external_volume)
+      m_char.external_volume.Notify([this](const std::vector<uint8_t> &bytes) { if (!bytes.empty()) OnExternalVolume(bytes[0]); } );
+}
+
+
 
 bool Side::Disconnect()
 {
@@ -198,6 +229,34 @@ bool Side::Reconnect()
       return false;
    }
 
+   RawHci hci(m_mac, m_sock);
+   // This requires CAP_NET_RAW
+   if (hci.SendConnectionUpdate(16, 16, 10, 100, 12, 12))
+   {
+      // This succeeded. Notify the device.
+      UpdateConnectionParameters(16);
+   }
+   else
+   {
+      // This failed (probably don't have requisite permissions). Extract the
+      // configured value using an unpriviledge request, and notify of that instead.
+      RawHci::SystemConfig config;
+      hci.ReadSysConfig(config);
+      if (config.max_conn_interval == config.min_conn_interval && config.max_conn_interval <= 16)
+         UpdateConnectionParameters(config.min_conn_interval);
+      else
+      {
+         // This configuration isn't going to work.
+         g_warning("The currently configured connection paramters will not work. "
+                   "Please set these values in /etc/bluetooth/main.conf, and restart the bluetooth service.\n"
+                   "  [LE]\n"
+                   "  MinConnectionInterval=16\n"
+                   "  MaxConnectionInterval=16\n"
+                   "  ConnectionLatency=10\n"
+                   "  ConnectionSupervisionTimeout=100");
+      }
+   }
+
    return true;
 }
 
@@ -233,6 +292,9 @@ bool Side::DisableStatusNotifications()
 
 bool Side::Start(bool otherstate)
 {
+   const char* side = Left() ? "left " : "right";
+   g_info("%s Sending ACP start other %s", side, otherstate ? "connected" : "not connected");
+
    static constexpr uint8_t G722_16KHZ = 1;
    m_ready_to_receive_audio = false;
    m_next_status_fn = [this](Status s) {
@@ -243,6 +305,9 @@ bool Side::Start(bool otherstate)
 
 bool Side::Stop()
 {
+   const char* side = Left() ? "left " : "right";
+   g_info("%s Sending ACP stop", side);
+
    m_ready_to_receive_audio = false;
    return m_char.audio_control.Write({Control::STOP});
 }
@@ -286,21 +351,136 @@ Side::WriteStatus Side::WriteAudioFrame(const AudioPacket& packet)
    return ret;
 }
 
+void Side::ReadFromAudioSocket()
+{
+   // ASHA standard says nothing about receiving traffic here, but android
+   // source says we get some statistics here.
+   // I haven't personally observed any traffic here.
+   if (m_sock != -1)
+   {
+      uint8_t buffer[512];
+      ssize_t count = recv(m_sock, buffer, sizeof(buffer), MSG_DONTWAIT);
+      if (count > 0)
+      {
+         const char* side = Left() ? "left " : "right";
+         for (int i = 0; i + 4 <= count; i += 4)
+         {
+            uint16_t events = *(uint16_t*)(buffer + i);
+            uint16_t frames = *(uint16_t*)(buffer + i + 2);
+            g_info("%s read %hu events %hu frames", side, events, frames);
+         }
+      }
+   }
+}
+
 bool Side::UpdateOtherConnected(bool connected)
 {
+   const char* side = Left() ? "left " : "right";
+   g_info("%s Sending ACP status other %s", side, connected ? "connected" : "not connected");
    return m_char.audio_control.Command({Control::STATUS, (connected ? Update::OTHER_CONNECTED : Update::OTHER_DISCONNECTED)});
 }
 
 bool Side::UpdateConnectionParameters(uint8_t interval)
 {
+   const char* side = Left() ? "left " : "right";
+   g_info("%s Sending ACP status paramters updated %hhu", side, interval);
    return m_char.audio_control.Command({Control::STATUS, Update::PARAMETERS_UPDATED, interval});
 }
 
 void Side::OnStatusNotify(const std::vector<uint8_t>& data)
 {
+   const char* side = Left() ? "left " : "right";
+   if (!data.empty())
+      g_info("%s AshaStatus: %hhu", side, data.front());
    if (m_next_status_fn && !data.empty())
    {
       m_next_status_fn((Status)data.front());
       m_next_status_fn = std::function<void(Status)>();
    }
+}
+
+void Side::OnHAStatus(const std::vector<uint8_t>& data)
+{
+   // 38278651-76d7-4dee-83d8-894f3fa6bb99 notifications
+   // I've partially figured out what some of this stuff means.
+   const char* side = Left() ? "left " : "right";
+   if (data.size() > 2)
+   {
+      // Header is two bytes, but I'm not sure how its broken up.
+      // Reading this as big-endian for convenience.
+      uint16_t header = data[0] << 8 | data[1];
+      switch(header)
+      {
+      case 0x0014: // Volume changed
+         if (data.size() == 5)
+         {
+            g_info("%s OnHaStatus(Muted: %hhu, Volume: %hhu, ??: %02hhx)", side, data[2], data[3], data[4]);
+            return;
+         }
+         break;
+      case 0x0194: // Not sure... it turns on and off with muting and streaming
+         if (data.size() == 3)
+         {
+            g_info("%s OnHAStatus(0194: %02hhx)", side, data[2]);
+            return;
+         }
+         break;
+      case 0x0034: // Stream state
+         if (data.size() == 3)
+         {
+            // Both hearing aids:
+            //    Sending ACP start goes to 3 at the same time we get asha status ok, then to 1 250ms later
+            //    Sending ACP stop goes to 2
+            // Only right HA turned on:
+            //    ACP start goes to 3 at the same time as asha status ok, then *no audio*.
+            //    no audio for several seconds
+            //    turn on left HA *but don't connect left to bluetooth*, goes to 1, audio starts
+            //
+            switch(data[2])
+            {
+            case 1:
+               g_info("%s OnHAStatus(Stream status 0034: (1) streaming)", side);
+               break;
+            case 2:
+               g_info("%s OnHAStatus(Stream status 0034: (2) stopped)", side);
+               break;
+            case 3:
+               g_info("%s OnHAStatus(Stream status 0034: (3) syncing)", side);
+               break;
+            default:
+               g_info("%s OnHAStatus(Stream status 0034: %02hhx)", side, data[2]);
+               break;
+            }
+            return;
+         }
+         break;
+      case 0x0024:
+         if (data.size() == 3)
+         {
+            g_info("%s OnHAStatus(Profile Index: %hhu)", side, data[2]);
+            return;
+         }
+         break;
+      case 0x0054:
+         // I have never seen this value change. I don't know what it is.
+         // always 00 54 69 ff 00 80 00
+         break;
+      }
+   }
+
+   std::stringstream ss;
+   HexDump(ss, data.data(), data.size());
+   g_info("%s OnHaStatus(%s)", side, ss.str().c_str());
+}
+
+
+void Side::OnBattery(uint8_t percent)
+{
+   g_info("%s Battery %hhu%%", Left() ? "Left" : "Right", percent);
+}
+
+
+void Side::OnExternalVolume(uint8_t value)
+{
+   g_info("%s External Volume %hhu", Left() ? "Left" : "Right", value);
 }

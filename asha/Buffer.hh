@@ -205,9 +205,6 @@ private:
    std::atomic<size_t> m_buffer_full{};
    uint8_t m_padding2[64];
 
-   // We use a sentry entry that is always unused, so that we can distinguish
-   // between a full ring and an empty ring. This means that technically we
-   // only have room for RING_SIZE - 1 buffers.
    RawS16 m_buffer[RING_SIZE];
 };
 

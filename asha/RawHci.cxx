@@ -1,5 +1,7 @@
 #include "RawHci.hh"
 
+#include "HexDump.hh"
+
 #include <iomanip>
 #include <iostream>
 
@@ -27,20 +29,6 @@
 //       MGMT_OP_READ_EXP_FEATURES_INFO,     // Read a set of list of 16 bit uuid features.
 //       MGMT_OP_READ_DEF_SYSTEM_CONFIG,     // Returns the system defaults (mostly the values in /etc/bluetooth/main.conf)
 //       MGMT_OP_READ_DEF_RUNTIME_CONFIG,    // seems to just return an empty response.
-
-namespace
-{
-   void DumpHex(uint8_t* p, size_t len)
-   {
-      auto oldflags = std::cout.flags();
-      for (ssize_t i = 0; i < len; ++i)
-      {
-         if (i != 0) std::cout << ' ';
-         std::cout << std::setfill('0') << std::setw(2) << std::hex << (uint32_t)p[i];
-      }
-      std::cout.flags(oldflags);
-   }
-}
 
 
 RawHci::RawHci(const std::string& mac, int connection_sock) noexcept
@@ -212,7 +200,7 @@ bool RawHci::ReadSysConfig(SystemConfig& config)
    int sock = socket(PF_BLUETOOTH, SOCK_RAW, BTPROTO_HCI);
    if (sock < 0)
    {
-      std::cout << "Unable to create management socket\n";
+      // std::cout << "Unable to create management socket\n";
       return false;
    }
    struct sockaddr_hci addr{};
@@ -221,14 +209,14 @@ bool RawHci::ReadSysConfig(SystemConfig& config)
    addr.hci_channel = htobs(HCI_CHANNEL_CONTROL);
    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0)
    {
-      std::cout << "Unable to bind to control channel\n";
+      // std::cout << "Unable to bind to control channel\n";
       close(sock);
       return false;
    }
 
    if (sizeof(hdr) != send(sock, &hdr, sizeof(hdr), 0))
    {
-      std::cout << "Unable to write management request: " << strerror(errno) << '\n';
+      // std::cout << "Unable to write management request: " << strerror(errno) << '\n';
       close(sock);
       return false;
    }
@@ -441,15 +429,20 @@ bool RawHci::SendAndWaitForResponse(const RequestT& request, ResponseT* response
    if (m_connection_id == INVALID_ID || (m_sock < 0))
       return false;
 
-   std::cout << "request: ";
-   DumpHex((uint8_t*)&request, sizeof(request));
-   std::cout << '\n';
+   // std::cout << "request: ";
+   // HexDump(std::cout, (uint8_t*)&request, sizeof(request));
+   // std::cout << '\n';
    while (send(m_sock, &request, sizeof(request), 0) < 0)
    {
       if (errno != EAGAIN && errno != EINTR)
       {
-         int e = errno;
-         std::cout << "Unable to send command: " << strerror(e) << '\n';
+         if (errno == EPERM)
+            return false;
+         else
+         {
+            int e = errno;
+            std::cout << "Unable to send command: " << strerror(e) << '\n';
+         }
          return false;
       }
    }
@@ -474,9 +467,9 @@ bool RawHci::SendAndWaitForResponse(const RequestT& request, ResponseT* response
       }
       else if (len > 1 + sizeof(hci_event_hdr))
       {
-         std::cout << "response: ";
-         DumpHex(buffer, len);
-         std::cout << '\n';
+         // std::cout << "response: ";
+         // HexDump(std::cout, buffer, len);
+         // std::cout << '\n';
          uint8_t* p = buffer;
          p += 1;
          len -= 1;
@@ -547,12 +540,12 @@ bool RawHci::SendAndWaitForResponse(const RequestT& request, ResponseT* response
                   }
                   else
                   {
-                     std::cout << "Whoops, we just consumed somebody else's command response.\n";
+                     // std::cout << "Whoops, we just consumed somebody else's command response.\n";
                   }
                }
                else
                {
-                  std::cout << "Just read a truncated command complete. I'm confused.\n";
+                  // std::cout << "Just read a truncated command complete. I'm confused.\n";
                }
                break;
             case EVT_LE_META_EVENT:
@@ -591,12 +584,12 @@ bool RawHci::SendAndWaitForResponse(const RequestT& request, ResponseT* response
                   }
                   else
                   {
-                     std::cout << "Whoops, we just consumed somebody else's meta update.\n";
+                     // std::cout << "Whoops, we just consumed somebody else's meta update.\n";
                   }
                }
                else
                {
-                  std::cout << "Just read a truncated meta event. I'm confused.\n";
+                  // std::cout << "Just read a truncated meta event. I'm confused.\n";
                }
                break;
             }
