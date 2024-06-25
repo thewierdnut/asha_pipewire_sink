@@ -1,5 +1,5 @@
 # ASHA (Audio Streaming for Hearing Aids) Pipewire Sink
-A sample ASHA implementation designed to work with pipewire and bluez.
+A sample ASHA implementation for Linux designed to work with pipewire and bluez.
 
 This project mostly follows the [Hearing Aid Audio Support Using Bluetooth LE](https://source.android.com/docs/core/connect/bluetooth/asha) document created by Google. Note that the specification varies in minor ways from the actual implementation used in the android source code.
 
@@ -61,7 +61,7 @@ sudo systemctl restart bluetooth
 ```
 
 ### Enable 2M PHY (optional)
-If you have a kernel older than 6.8, 2M PHY will not be automatically enabled. With 1M PHY (the default), I can only reliably stream audio to a single hearing aid. In order to utilize both hearing aids, I have to manually enable 2M PHY. I haven't been able to find a configuration option or a bluez interface that will do this, so I have had to resort to using btmgmt commands to do this. You can check your existing enabled PHYs with `btmgmt phy`. If the `Configurable phys` contains `LE2MTX` and `LE2MRX`, but the `Selected phys` does not, then you can copy your existing `Selected phys`, and add the values `LE2MTX LE2MRX` to it. On my system, that looks like this:
+If you have a kernel older than 6.8, 2M PHY will not be automatically enabled. I have had success with both 1M and 2M PHY, but people have reported only getting it to work with 2M PHY. I haven't been able to find an option to configure this using dbus, the kernel, or the bluez configuration, so I have had to resort to using btmgmt commands to set the default PHY configuration. You can check your existing enabled PHYs with `btmgmt phy`. If the `Configurable phys` contains `LE2MTX` and `LE2MRX`, but the `Selected phys` does not, then you can copy your existing `Selected phys`, and add the values `LE2MTX LE2MRX` to it. On my system, that looks like this:
 
 ```sh
 # Check the existing phys
@@ -99,8 +99,8 @@ make
 ```
 
 ## Running
-### Enable 2MPHY if your adapter and your devices support it.
-This is not mandatory, but I've only been able to reliably stream to both hearing aids with this enabled. This must be done before connecting your hearing aids. Please read [Enable 2M Phy](#enable-2m-phy-optional) for more details, but on my box, it looks like this:
+### Enable 2MPHY if your adapter and your devices support it (Optional).
+This must be done before connecting your hearing aids. Please read [Enable 2M Phy](#enable-2m-phy-optional) for more details, but on my box, it looks like this:
 ```
 sudo btmgmt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX
 ```
