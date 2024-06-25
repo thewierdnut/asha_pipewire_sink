@@ -10,12 +10,11 @@
 
 using namespace asha;
 
-Device::Device(uint64_t hisync, const std::string& name, const std::string& alias, ReconnectCallback cb):
+Device::Device(uint64_t hisync, const std::string& name, const std::string& alias):
    m_hisync{hisync},
    m_name{name},
    m_alias{alias},
-   m_buffer{new Buffer<RING_BUFFER_SIZE>([this](const RawS16& samples) { return SendAudio(samples); })},
-   m_reconnect_cb{cb}
+   m_buffer{new Buffer<RING_BUFFER_SIZE>([this](const RawS16& samples) { return SendAudio(samples); })}
 {
    auto lock = pw::Thread::Get()->Lock();
    m_stream = std::make_shared<pw::Stream>(
@@ -291,47 +290,21 @@ bool Device::RemoveSide(const std::string& path)
    {
       if (it->first == path)
       {
-         auto lock = pw::Thread::Get()->Lock();
+         // We need to stop the streaming thread so that it doesn't attempt
+         // buffer delivery after we have deleted the side. First though, lets
+         // remove it from m_sides so that we don't set a Stop() to it.
+         std::shared_ptr<asha::Side> to_delete(std::move(it->second));
          m_sides.erase(it);
 
+         auto old_state = m_state;
+         if (m_state == STREAMING)
+            Stop();
+
          for (auto& side: m_sides)
             side.second->UpdateOtherConnected(false);
-         return true;
-      }
-   }
-   return false;
-}
 
-
-// Called when an asha bluetooth device is removed.
-bool Device::Reconnect(const std::string& path)
-{
-   return false;
-   // Called from dbus thread
-   auto lock = pw::Thread::Get()->Lock();
-   auto it = m_sides.begin();
-   for (; it != m_sides.end(); ++it)
-   {
-      if (it->first == path)
-      {
-         bool otherstate = false;
-         for (auto& side: m_sides)
-         {
-            if (side.second == it->second)
-               continue;
-            side.second->UpdateOtherConnected(false);
-            otherstate |= side.second->Ready();
-         }
-         it->second->Stop();
-         it->second->Reconnect();
-         it->second->Start(otherstate);
-
-         for (auto& side: m_sides)
-         {
-            if (side.second == it->second)
-               continue;
-            side.second->UpdateOtherConnected(true);
-         }
+         if (old_state == STREAMING)
+            Start();
          return true;
       }
    }

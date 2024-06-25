@@ -133,17 +133,11 @@ void Asha::OnAddDevice(const Bluetooth::BluezDevice& d)
          it = m_devices.emplace(props.hi_sync_id, std::make_shared<Device>(
             props.hi_sync_id,
             side->Name(),
-            side->Alias(),
-            [this](const std::string& path) { OnReconnectDevice(path); }
+            side->Alias()
          )).first;
          g_info("Adding Sink %lu %s", it->first, it->second->Name().c_str());
       }
-      auto local_path = d.path;
-      auto local_side_ptr = side;
-      auto local_device = it->second;
-      Defer([=]() {
-         local_device->AddSide(local_path, local_side_ptr);
-      });
+      it->second->AddSide(d.path, side);
    }
 }
 
@@ -155,60 +149,19 @@ void Asha::OnRemoveDevice(const std::string& path)
    // all.
    // This is deferred so that we don't have race conditions during creation,
    // since the creation is also deferred.
-   auto local_path = path;
-   Defer([=]() {
-      for (auto it = m_devices.begin(); it != m_devices.end(); ++it)
-      {
-         if (it->second->RemoveSide(local_path))
-         {
-            if (it->second->SideCount() == 0)
-            {
-               // Both left and right sides have disconnected, so erase the
-               // device. This will also remove it from the set of available
-               // pipewire sinks.
-               g_info("Removing Sink %lu %s", it->first, it->second->Name().c_str());
-               m_devices.erase(it);
-            }
-            break;
-         }
-      }
-   });
-}
-
-
-void Asha::OnReconnectDevice(const std::string& path)
-{
-   // We don't know which audio device has the bluetooth device, but in all
-   // likelyhood, there will only be one anyways, so just check them all.
-   auto local_path = path;
-   Defer([=]() {
-      for (auto it = m_devices.begin(); it != m_devices.end(); ++it)
-      {
-         it->second->Stop();
-         usleep(10000);
-         it->second->Start();
-      }
-   });
-}
-
-
-void Asha::Defer(std::function<void()> fn)
-{
-   std::lock_guard<std::mutex> lock(m_async_queue_mutex);
-   m_async_queue.emplace_back(fn);
-   if (m_async_queue.size() == 1)
+   for (auto it = m_devices.begin(); it != m_devices.end(); ++it)
    {
-      g_timeout_add(DEFER_INTERVAL_MS, [](void* user_data) {
-         return ((Asha*)user_data)->ProcessDeferred();
-      }, this);
+      if (it->second->RemoveSide(path))
+      {
+         if (it->second->SideCount() == 0)
+         {
+            // Both left and right sides have disconnected, so erase the
+            // device. This will also remove it from the set of available
+            // pipewire sinks.
+            g_info("Removing Sink %lu %s", it->first, it->second->Name().c_str());
+            m_devices.erase(it);
+         }
+         break;
+      }
    }
-}
-
-int Asha::ProcessDeferred()
-{
-   std::lock_guard<std::mutex> lock(m_async_queue_mutex);
-
-   m_async_queue.front()();
-   m_async_queue.pop_front();
-   return m_async_queue.empty() ? G_SOURCE_REMOVE : G_SOURCE_CONTINUE;
 }

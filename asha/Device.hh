@@ -26,8 +26,7 @@ template <size_t T> class Buffer;
 class Device final
 {
 public:
-   typedef std::function<void(const std::string& path)> ReconnectCallback;
-   Device(uint64_t hisync, const std::string& name, const std::string& alias, ReconnectCallback cb);
+   Device(uint64_t hisync, const std::string& name, const std::string& alias);
    ~Device();
 
    const std::string& Name() const { return m_name; }
@@ -45,7 +44,6 @@ protected:
    // These will be called by the asha management singleton. (main thread)
    void AddSide(const std::string& path, const std::shared_ptr<Side>& side);
    bool RemoveSide(const std::string& path);
-   bool Reconnect(const std::string& path);
 
    // These will be called by the pipewire stream. (pipewire thread)
    void Connect();
@@ -74,10 +72,6 @@ private:
    std::shared_ptr<pw::Stream> m_stream;
    uint8_t m_audio_seq = 0;
    int8_t m_volume = -60;
-
-   // If we need to reconnect, we need to do it on the main thread, and it
-   // needs to be serialized with connect/disconnect events.
-   ReconnectCallback m_reconnect_cb;
 
    friend class Asha;
 };

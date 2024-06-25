@@ -383,7 +383,7 @@ bool Side::UpdateOtherConnected(bool connected)
 bool Side::UpdateConnectionParameters(uint8_t interval)
 {
    const char* side = Left() ? "left " : "right";
-   g_info("%s Sending ACP status paramters updated %hhu", side, interval);
+   g_info("%s Sending ACP status parameters updated %hhu", side, interval);
    return m_char.audio_control.Command({Control::STATUS, Update::PARAMETERS_UPDATED, interval});
 }
 
