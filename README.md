@@ -85,7 +85,7 @@ I haven't yet found a configuration setting that will make this setup persist th
 
 On my debian development system, I can install all of this with:
 ```
-sudo apt-get install build-essential cmake libglib2.0-dev libpipewire-0.3-dev
+sudo apt-get install build-essential cmake libglib2.0-dev libpipewire-0.3-dev libbluetooth-dev
 ```
 
 ### Compiling
