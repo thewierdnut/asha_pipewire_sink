@@ -80,6 +80,7 @@ I haven't yet found a configuration setting that will make this setup persist th
 
 * glib development packages
 * pipewire development packages
+* bluetooth development packages
 * CMake 3.9
 * C++14 compiler
 
