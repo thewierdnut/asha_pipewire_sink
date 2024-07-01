@@ -164,9 +164,9 @@ protected:
          side->SetStreamVolume(m_volume);
 
          bool set_ce_length = false;
-         if (m_ce_length)
+         if (m_ce_length || m_timeout)
          {
-            if (raw_hci.SendConnectionUpdate(16, 16, 10, m_timeout, m_ce_length, m_ce_length))
+            if (raw_hci.SendConnectionUpdate(16, 16, 10, m_timeout ? m_timeout : 100, m_ce_length, m_ce_length))
             {
                std::cout << "    Switched to connection interval 16 ce length " << m_ce_length << "\n";
                side->UpdateConnectionParameters(16);
@@ -473,7 +473,7 @@ int main(int argc, char** argv)
    int8_t volume = -64;
    
    uint16_t ce_length = 0;
-   uint16_t timeout = 100;
+   uint16_t timeout = 0;
    bool phy1m = false;
    bool phy2m = false;
 
