@@ -41,8 +41,8 @@ std::vector<uint8_t> ReadFile(const std::string& path)
 class StreamTest
 {
 public:
-   StreamTest(const std::string& left_path, const std::string& right_path, uint16_t ce_length, bool phy1m, bool phy2m):
-      m_ce_length{ce_length}, m_phy1m{phy1m}, m_phy2m{phy2m},
+   StreamTest(const std::string& left_path, const std::string& right_path, uint16_t ce_length, uint16_t timeout, bool phy1m, bool phy2m):
+      m_ce_length{ce_length}, m_timeout(timeout), m_phy1m{phy1m}, m_phy2m{phy2m},
       m_data_left{left_path.empty() ? std::vector<uint8_t>() : ReadFile(left_path)},
       m_data_right{right_path.empty() ? std::vector<uint8_t>() : ReadFile(right_path)},
       m_b(
@@ -166,7 +166,7 @@ protected:
          bool set_ce_length = false;
          if (m_ce_length)
          {
-            if (raw_hci.SendConnectionUpdate(16, 16, 10, 100, m_ce_length, m_ce_length))
+            if (raw_hci.SendConnectionUpdate(16, 16, 10, m_timeout, m_ce_length, m_ce_length))
             {
                std::cout << "    Switched to connection interval 16 ce length " << m_ce_length << "\n";
                side->UpdateConnectionParameters(16);
@@ -427,6 +427,7 @@ protected:
 
 private:
    uint16_t m_ce_length = 0;
+   uint16_t m_timeout = 100;
    bool m_phy1m = false;
    bool m_phy2m = false;
    std::vector<uint8_t> m_data_left;
@@ -455,6 +456,7 @@ void HelpAndExit(const std::string& path)
              << "   --volume [-128 to 0]        Set the volume [default: -64]\n"
              << "   --algorithm (deadline|fixed|poll) Streaming algorithm to use [default: fixed]\n"
              << "   --celength                  Attempt to set the ce length [CAP_NET_RAW required]\n"
+             << "   --timeout                   Attempt to set the timeout multiplier [CAP_NET_RAW required]\n"
              << "   --phy1m                     Attempt to enable 1M PHY [CAP_NET_RAW required]\n"
              << "   --phy2m                     Attempt to enable 2M PHY [CAP_NET_RAW required]\n";
    exit(1);
@@ -471,6 +473,7 @@ int main(int argc, char** argv)
    int8_t volume = -64;
    
    uint16_t ce_length = 0;
+   uint16_t timeout = 100;
    bool phy1m = false;
    bool phy2m = false;
 
@@ -491,6 +494,8 @@ int main(int argc, char** argv)
       }
       else if (0 == strcmp(argv[i], "--celength") && i + 1 < argc)
          ce_length = atoi(argv[++i]);
+      else if (0 == strcmp(argv[i], "--timeout") && i + 1 < argc)
+         timeout = atoi(argv[++i]);
       else if (0 == strcmp(argv[i], "--phy2m"))
          phy2m = true;
       else if (0 == strcmp(argv[i], "--phy1m"))
@@ -518,7 +523,7 @@ int main(int argc, char** argv)
       HelpAndExit(argv[0]);
    }
 
-   StreamTest c(left_path, right_path, ce_length, phy1m, phy2m);
+   StreamTest c(left_path, right_path, ce_length, timeout, phy1m, phy2m);
    c.SetVolume(volume);
 
 
