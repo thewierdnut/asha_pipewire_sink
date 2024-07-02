@@ -231,19 +231,17 @@ bool Side::Reconnect()
 
    RawHci hci(m_mac, m_sock);
    // This requires CAP_NET_RAW
-   if (hci.SendConnectionUpdate(16, 16, 10, 100, 12, 12))
-   {
-      // This succeeded. Notify the device.
-      UpdateConnectionParameters(16);
-   }
-   else
+   if (!hci.SendConnectionUpdate(m_interval, m_interval, m_latency, m_timeout, m_celen, m_celen))
    {
       // This failed (probably don't have requisite permissions). Extract the
       // configured value using an unpriviledge request, and notify of that instead.
       RawHci::SystemConfig config;
       hci.ReadSysConfig(config);
       if (config.max_conn_interval == config.min_conn_interval && config.max_conn_interval <= 16)
-         UpdateConnectionParameters(config.min_conn_interval);
+      {
+         m_interval = config.min_conn_interval;
+         UpdateConnectionParameters(m_interval);
+      }
       else
       {
          // This configuration isn't going to work.
@@ -256,6 +254,7 @@ bool Side::Reconnect()
                    "  ConnectionSupervisionTimeout=100");
       }
    }
+   UpdateConnectionParameters(m_interval);
 
    return true;
 }

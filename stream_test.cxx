@@ -140,7 +140,10 @@ protected:
             std::cout << "    Ignoring this device, since you didn't specify a right audio file\n";
             return;
          }
-         std::cout << "    Connected: " << (side->Connect() ? "true": "false") << '\n';
+         side->SetConnectionParameters(16, 10, m_timeout ? m_timeout : 100, m_ce_length ? m_ce_length : 12);
+         bool connected = side->Connect();
+
+         std::cout << "    Connected: " << (connected ? "true": "false") << '\n';
 
          usleep(10000);
 
@@ -162,25 +165,6 @@ protected:
 
          
          side->SetStreamVolume(m_volume);
-
-         bool set_ce_length = false;
-         if (m_ce_length || m_timeout)
-         {
-            if (raw_hci.SendConnectionUpdate(16, 16, 10, m_timeout ? m_timeout : 100, m_ce_length, m_ce_length))
-            {
-               std::cout << "    Switched to connection interval 16 ce length " << m_ce_length << "\n";
-               side->UpdateConnectionParameters(16);
-               set_ce_length = true;
-            }
-            else
-               std::cout << "    Unable to set connection interval (needs CAP_NET_RAW for this to work)\n";
-         }
-         if (!set_ce_length)
-         {
-            RawHci::SystemConfig config;
-            if (raw_hci.ReadSysConfig(config))
-               side->UpdateConnectionParameters(config.min_conn_interval);
-         }
 
          Stop();
 

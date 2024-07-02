@@ -72,6 +72,15 @@ public:
 
    int Sock() const { return m_sock; }
 
+   // Must be called before Connect()
+   void SetConnectionParameters(uint16_t interval, uint16_t latency, uint16_t timeout, uint16_t celen)
+   {
+      m_interval = interval;
+      m_latency = latency;
+      m_timeout = timeout;
+      m_celen = celen;
+   }
+
 private:
    Side() {}
    bool EnableStatusNotifications();
@@ -111,9 +120,11 @@ private:
 
    std::function<void(Status)> m_next_status_fn;
 
-   // TODO: remove this debugging code
-   // std::shared_ptr<struct _GTimer> m_timer;
-   // size_t m_packet_count = 0;
+   // Need CAP_NET_RAW to set these
+   uint16_t m_interval = 16;
+   uint16_t m_latency = 10;
+   uint16_t m_timeout = 100;
+   uint16_t m_celen = 12;
 };
 
 }
