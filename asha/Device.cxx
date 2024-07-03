@@ -18,7 +18,7 @@ Device::Device(uint64_t hisync, const std::string& name, const std::string& alia
 {
    auto lock = pw::Thread::Get()->Lock();
    m_stream = std::make_shared<pw::Stream>(
-      name, alias,
+      "asha_"+std::to_string(hisync), name,
       [this]() { Connect(); Start(); },
       [this]() { Stop(); Disconnect(); },
       [this]() { /* m_buffer->FlushAndReset(); */ },
