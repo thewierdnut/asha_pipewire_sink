@@ -47,6 +47,8 @@ add_executable(asha_pipewire_sink
    asha/GVariantDump.cxx
    asha/Side.cxx
    asha/RawHci.cxx
+   asha/GattProfile.cxx
+   asha/ObjectManager.cxx
 
    g722/g722_encode.c
 
@@ -58,5 +60,14 @@ add_executable(asha_pipewire_sink
 target_link_libraries(asha_pipewire_sink PkgConfig::GLIB PkgConfig::PIPEWIRE)
 
 
-# add_executable(test_sink pw/export-sink.cxx)
-# target_link_libraries(test_sink PkgConfig::PIPEWIRE)
+# add_executable(monitor_test
+#    asha/BluetoothMonitor.cxx
+#    asha/Discover.cxx
+#    asha/Profile.cxx
+#    asha/GattProfile.cxx
+#    asha/GVariantDump.cxx
+#    asha/ObjectManager.cxx
+#
+#    monitor_test.cxx
+# )
+# target_link_libraries(monitor_test PkgConfig::GLIB)
