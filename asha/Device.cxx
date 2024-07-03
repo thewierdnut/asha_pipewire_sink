@@ -19,10 +19,10 @@ Device::Device(uint64_t hisync, const std::string& name, const std::string& alia
    auto lock = pw::Thread::Get()->Lock();
    m_stream = std::make_shared<pw::Stream>(
       name, alias,
-      [this]() { Connect(); },
-      [this]() { Disconnect(); },
-      [this]() { Start(); /* m_buffer->FlushAndReset(); */ },
-      [this]() { Stop(); },
+      [this]() { Connect(); Start(); },
+      [this]() { Stop(); Disconnect(); },
+      [this]() { /* m_buffer->FlushAndReset(); */ },
+      [this]() { },
       [this](const RawS16& samples) {
          // TODO: redesign this api so that we can retrieve the pointer and
          //       have the pipewire stream fill it in.
@@ -273,7 +273,7 @@ void Device::AddSide(const std::string& path, const std::shared_ptr<Side>& side)
       m_sides.emplace_back(path, side);
    }
    else
-      g_error("Failed to connect to %s", side->Description().c_str());
+      g_warning("Failed to connect to %s", side->Description().c_str());
 
    if (old_state == STREAMING)
       Start();
@@ -303,7 +303,7 @@ bool Device::RemoveSide(const std::string& path)
          for (auto& side: m_sides)
             side.second->UpdateOtherConnected(false);
 
-         if (old_state == STREAMING)
+         if (old_state == STREAMING && !m_sides.empty())
             Start();
          return true;
       }

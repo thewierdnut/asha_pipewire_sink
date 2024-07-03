@@ -16,7 +16,7 @@ using namespace asha;
 namespace
 {
    constexpr char BLUEZ_DEVICE[] = "org.bluez.Device1";
-   static constexpr char GATT_SERVICE_UUID[]    = "0000fdf0-0000-1000-8000-00805f9b34fb";
+   static constexpr char ASHA_SERVICE_UUID[]    = "0000fdf0-0000-1000-8000-00805f9b34fb";
 
    uint64_t g_next_notify_id = 0;
 }
@@ -268,13 +268,7 @@ void Bluetooth::ProcessDeviceProperty(BluezDevice& device, const char* key, stru
    // }
    else if (g_str_equal("Connected", key))
    {
-      device.connected = g_variant_get_boolean(value);
-   }
-   else if (g_str_equal("Connected", key))
-   {
       // This gets set when somebody intentionally attaches the device.
-      // TODO: I think we can auto-detect these and trigger a connection
-      //       ourselves.
       device.connected = g_variant_get_boolean(value);
    }
    else if (g_str_equal("ServicesResolved", key))
@@ -282,6 +276,13 @@ void Bluetooth::ProcessDeviceProperty(BluezDevice& device, const char* key, stru
       // This gets set when all the services and characteristics have been
       // enumerated. Presumably we won't see any more changes now.
       device.resolved = g_variant_get_boolean(value);
+   }
+   else if (g_str_equal("RSSI", key))
+   {
+      // These only ever get set by advertisements.
+      // Aaaaand... they don't get unset when the device goes out of range.
+      // Seeing this set only indicates that the device has been seen at some
+      // time in the past.
    }
 
    bool now_ready = device.resolved && device.connected;

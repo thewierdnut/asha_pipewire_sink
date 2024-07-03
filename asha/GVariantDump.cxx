@@ -19,9 +19,8 @@ void GVariantDump(GVariant* v, std::ostream& out, const std::string& whitespace)
    //case G_VARIANT_CLASS_MAYBE: // TODO
    case G_VARIANT_CLASS_ARRAY:
       // TODO: hexdump byte arrays?
-      if (type[1] == '{')
+      if (type[1] == '{') // Dictionary
       {
-         // dictionary
          gsize n = g_variant_n_children(v);
          if (n == 0)
          {
@@ -45,9 +44,27 @@ void GVariantDump(GVariant* v, std::ostream& out, const std::string& whitespace)
             out << '\n' << whitespace << "}";
          }
       }
-      else
+      else if (type[1] == 'y') // Byte array
       {
-         // normal array
+         gsize n = g_variant_n_children(v);
+         if (n == 0)
+         {
+            out << "[]";
+         }
+         else
+         {
+            out << "[";
+            for (size_t i = 0; i < n; ++i)
+            {
+               std::shared_ptr<GVariant> e(g_variant_get_child_value(v, i), g_variant_unref);
+               if (i != 0) out << ", ";
+               GVariantDump(e.get(), out, whitespace + tab);
+            }
+            out << ']';
+         }
+      }
+      else // Other
+      {
          gsize n = g_variant_n_children(v);
          if (n == 0)
          {
@@ -144,4 +161,11 @@ void GVariantDump(GVariant* v, std::ostream& out, const std::string& whitespace)
    default:
       out << "???";
    }
+}
+
+std::string GVariantDump(GVariant* v)
+{
+   std::stringstream ss;
+   GVariantDump(v, ss);
+   return ss.str();
 }

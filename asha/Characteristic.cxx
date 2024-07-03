@@ -275,7 +275,6 @@ std::shared_ptr<_GVariant> Characteristic::Call(const char* fname, const std::sh
       if (result)
       {
          // Convert from floating reference to a full reference.
-         // g_variant_ref_sink(result);
          return std::shared_ptr<GVariant>(result, g_variant_unref);
       }
       else
