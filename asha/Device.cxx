@@ -144,6 +144,8 @@ void Device::Stop()
 // Called whenever another 320 samples are ready.
 bool Device::SendAudio(const RawS16& samples)
 {
+   if (m_sides.empty()) return false;
+
    bool ready = true;
    for (auto& kv: m_sides)
    {
@@ -154,10 +156,6 @@ bool Device::SendAudio(const RawS16& samples)
    bool success = false;
    if (m_state == STREAMING)
    {
-      AudioPacket left;
-      AudioPacket right;
-      left.seq = right.seq = m_audio_seq;
-
       bool left_encoded = false;
       bool right_encoded = false;
 
@@ -175,26 +173,35 @@ bool Device::SendAudio(const RawS16& samples)
          return false;
       }
 
+      AudioPacket packets[2];
+      AudioPacket* left;
+      AudioPacket* right;
+
+      if (m_sides.size() == 1)
+      {
+         // Mix the two sides together.
+         int16_t mono_samples[RawS16::SAMPLE_COUNT];
+         for (size_t i = 0; i < RawS16::SAMPLE_COUNT; ++i)
+            mono_samples[i] = ((int32_t)samples.l[i] + (int32_t)samples.r[i]) / 2;
+         left = right = &packets[0];
+         g722_encode(&m_state_left, left->data, mono_samples, samples.SAMPLE_COUNT);
+      }
+      else
+      {
+         left = &packets[0];
+         right = &packets[1];
+
+         g722_encode(&m_state_left, left->data, samples.l, samples.SAMPLE_COUNT);
+         g722_encode(&m_state_right, right->data, samples.r, samples.SAMPLE_COUNT);
+      }
+      assert(left);
+      assert(right);
+
+      left->seq = right->seq = m_audio_seq;
+
       for (auto& kv: m_sides)
       {
-         if (kv.second->Right())
-         {
-            if (!right_encoded)
-            {
-               g722_encode(&m_state_right, right.data, samples.r, samples.SAMPLE_COUNT);
-               right_encoded = true;
-            }
-         }
-         else
-         {
-            if (!left_encoded)
-            {
-               g722_encode(&m_state_left, left.data, samples.l, samples.SAMPLE_COUNT);
-               left_encoded = true;
-            }
-         }
-
-         Side::WriteStatus status = kv.second->WriteAudioFrame(kv.second->Right() ? right : left);
+         Side::WriteStatus status = kv.second->WriteAudioFrame(kv.second->Right() ? *right : *left);
          switch(status)
          {
          case Side::WRITE_OK:
