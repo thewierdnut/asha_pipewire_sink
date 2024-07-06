@@ -1,4 +1,5 @@
 #include "asha/Asha.hh"
+#include "asha/Config.hh"
 #include "asha/GattProfile.hh"
 
 #include <glib-2.0/glib.h>
@@ -18,8 +19,10 @@ int Shutdown(void* ml)
 
 
 
-int main()
+int main(int argc, char** argv)
 {
+   asha::Config::ReadArgs(argc, argv);
+
    setenv("G_MESSAGES_DEBUG", "all", false);
 
    g_info("Starting...");
@@ -27,7 +30,11 @@ int main()
    auto quitter1 = g_unix_signal_add(SIGINT, Shutdown, loop.get());
    auto quitter2 = g_unix_signal_add(SIGTERM, Shutdown, loop.get());
    asha::Asha a;
-   asha::GattProfile profile;
+
+   // Auto-reconnection logic can be "annoyingly persistent". Make it optional.
+   std::unique_ptr<asha::GattProfile> profile;
+   if (asha::Config::Reconnect())
+      profile.reset(new asha::GattProfile);
 
    static size_t dropped = 0;
    static size_t failed = 0;

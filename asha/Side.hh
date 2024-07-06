@@ -57,7 +57,7 @@ public:
    bool Connect();
    bool Reconnect();
    void SetStreamVolume(int8_t volume);
-   void SetDeviceVolume(int8_t volume);
+   void SetExternalVolume(uint8_t volume);
    // Start playback. The callback is called once the device is ready to receive.
    bool Start(bool otherstate);
    bool Stop();

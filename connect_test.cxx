@@ -1,4 +1,5 @@
 #include "asha/Bluetooth.hh"
+#include "asha/Config.hh"
 #include "asha/RawHci.hh"
 #include "asha/Side.hh"
 
@@ -303,6 +304,8 @@ private:
 
 int main()
 {
+   asha::Config::SetHelpDescription("Attempts to connect to any hearing devices it detects. Does not send audio.");
+   
    setenv("G_MESSAGES_DEBUG", "all", false);
    ConnectTest c;
 

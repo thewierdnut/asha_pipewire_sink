@@ -19,6 +19,7 @@ pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3 libspa-0.2)
 add_executable(asha_connection_test
    asha/Bluetooth.cxx
    asha/Characteristic.cxx
+   asha/Config.cxx
    asha/RawHci.cxx
    asha/Side.cxx
    asha/GVariantDump.cxx
@@ -29,10 +30,16 @@ target_link_libraries(asha_connection_test PkgConfig::GLIB)
 
 add_executable(asha_stream_test
    asha/Bluetooth.cxx
+   asha/Buffer.cxx
+   asha/BufferThreaded.cxx
+   asha/BufferTimed.cxx
    asha/Characteristic.cxx
+   asha/Config.cxx
    asha/Side.cxx
    asha/GVariantDump.cxx
    asha/RawHci.cxx
+
+   g722/g722_encode.c
 
    stream_test.cxx
 )
@@ -42,6 +49,10 @@ target_link_libraries(asha_stream_test PkgConfig::GLIB)
 add_executable(asha_pipewire_sink
    asha/Asha.cxx
    asha/Bluetooth.cxx
+   asha/Buffer.cxx
+   asha/BufferThreaded.cxx
+   asha/BufferTimed.cxx
+   asha/Config.cxx
    asha/Characteristic.cxx
    asha/Device.cxx
    asha/GVariantDump.cxx

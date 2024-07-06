@@ -3,25 +3,28 @@
 #include "Buffer.hh"
 #include "../pw/Stream.hh"
 #include "../pw/Thread.hh"
+#include "Buffer.hh"
 #include "Side.hh"
 
+#include <cassert>
 #include <poll.h>
 #include <glib.h>
 
 using namespace asha;
 
+
 Device::Device(uint64_t hisync, const std::string& name, const std::string& alias):
    m_hisync{hisync},
    m_name{name},
    m_alias{alias},
-   m_buffer{new Buffer<RING_BUFFER_SIZE>([this](const RawS16& samples) { return SendAudio(samples); })}
+   m_buffer{Buffer::Create([this](const RawS16& samples) { return SendAudio(samples); })}
 {
    auto lock = pw::Thread::Get()->Lock();
    m_stream = std::make_shared<pw::Stream>(
       "asha_"+std::to_string(hisync), name,
       [this]() { Connect(); Start(); },
       [this]() { Stop(); Disconnect(); },
-      [this]() { /* m_buffer->FlushAndReset(); */ },
+      [this]() { },
       [this]() { },
       [this](const RawS16& samples) {
          // TODO: redesign this api so that we can retrieve the pointer and
@@ -135,8 +138,10 @@ void Device::Stop()
    // Already holding pipewire thread lock.
    m_buffer->Stop();
    if (m_state == STREAMING)
+   {
       for (auto& kv: m_sides)
          kv.second->Stop();
+   }
    m_state = PAUSED;
 }
 
@@ -246,14 +251,14 @@ void Device::SetStreamVolume(bool left, int8_t v)
 
 
 // Called when audio property is adjusted.
-void Device::SetDeviceVolume(bool left, int8_t v)
+void Device::SetExternalVolume(bool left, int8_t v)
 {
    // Already holding pipewire thread lock.
    m_volume = v;
    for (auto& kv: m_sides)
    {
       if (left == kv.second->Left())
-         kv.second->SetDeviceVolume(v);
+         kv.second->SetExternalVolume(v);
    }
 }
 

@@ -20,7 +20,7 @@ namespace pw {
 namespace asha {
 
 class Side;
-template <size_t T> class Buffer;
+class Buffer;
 
 // Manage a pair of hearing devices.
 class Device final
@@ -52,7 +52,7 @@ protected:
    void Stop();
    bool SendAudio(const RawS16& samples);
    void SetStreamVolume(bool left, int8_t v);
-   void SetDeviceVolume(bool left, int8_t v);
+   void SetExternalVolume(bool left, int8_t v);
 
 private:
    uint64_t m_hisync;
@@ -61,8 +61,7 @@ private:
    enum {DISCONNECTED, CONNECTED, PAUSED, STREAMING} m_state = DISCONNECTED;
 
 
-   static constexpr size_t RING_BUFFER_SIZE = 4;
-   std::shared_ptr<Buffer<RING_BUFFER_SIZE>> m_buffer;
+   std::shared_ptr<Buffer> m_buffer;
    g722_encode_state_t m_state_left{};
    g722_encode_state_t m_state_right{};
 

@@ -1,5 +1,6 @@
 #include "Side.hh"
 
+#include "Config.hh"
 #include "HexDump.hh"
 #include "RawHci.hh"
 
@@ -50,7 +51,7 @@ namespace Update
 
 std::shared_ptr<Side> Side::CreateIfValid(const Bluetooth::BluezDevice& device)
 {
-   // Don't return the side unless the correct asha charachteristics exist.
+   // Don't return the side unless the correct asha characteristics exist.
    std::shared_ptr<Side> side(new Side);
    for(auto& c: device.characteristics)
    {
@@ -68,10 +69,15 @@ std::shared_ptr<Side> Side::CreateIfValid(const Bluetooth::BluezDevice& device)
    if (side->m_char.properties && side->m_char.audio_control &&
        side->m_char.status && side->m_char.volume && side->m_char.le_psm_out)
    {
-      //side->m_timer.reset(g_timer_new(), g_timer_destroy);
       side->m_mac = device.mac;
       side->m_name = device.name;
       side->m_alias = device.alias;
+
+      side->m_interval = Config::Interval();
+      side->m_timeout = Config::Timeout();
+      side->m_celen = Config::Celength();
+      side->m_volume = Config::Volume();
+
       return side;
    }
    else
@@ -230,6 +236,13 @@ bool Side::Reconnect()
    }
 
    RawHci hci(m_mac, m_sock);
+   if (Config::Phy1m() || Config::Phy2m())
+   {
+      // This requires CAP_NET_RAW
+      if (!hci.SendPhy(Config::Phy1m(), Config::Phy2m()))
+         g_warning("Unable to negotiate the requested PHY without CAP_NET_RAW");
+   }
+
    // This requires CAP_NET_RAW
    if (!hci.SendConnectionUpdate(m_interval, m_interval, m_latency, m_timeout, m_celen, m_celen))
    {
@@ -238,10 +251,7 @@ bool Side::Reconnect()
       RawHci::SystemConfig config;
       hci.ReadSysConfig(config);
       if (config.max_conn_interval == config.min_conn_interval && config.max_conn_interval <= 16)
-      {
          m_interval = config.min_conn_interval;
-         UpdateConnectionParameters(m_interval);
-      }
       else
       {
          // This configuration isn't going to work.
@@ -268,11 +278,10 @@ void Side::SetStreamVolume(int8_t volume)
 }
 
 
-void Side::SetDeviceVolume(int8_t volume)
+void Side::SetExternalVolume(uint8_t volume)
 {
-   // TODO: This will probably be manufacturer specific.
-   // Starkey:
-   //    Volume is f3f594f9-e210-48f3-85e2-4b0cf235a9d3, range of 00 to ff
+   if (m_char.external_volume)
+      m_char.external_volume.Command({volume});
 }
 
 
