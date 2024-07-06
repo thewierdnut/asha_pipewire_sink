@@ -25,7 +25,7 @@ public:
    
    
    
-   struct Properties
+   struct AshaProps
    {
       uint8_t version;        // must be 0x01
       uint8_t capabilities;   // Mask. 0x01 is right side, 0x02 is binaural, 0x04 is CSIS support
@@ -48,8 +48,8 @@ public:
    std::string Mac() const { return m_mac; }
    Status ReadStatus();
    bool ReadProperties();
-   const Properties& GetProperties() const { return m_properties; }
-   bool Right() const { return m_properties.capabilities & 0x01; }
+   const AshaProps& GetProperties() const { return m_asha_props; }
+   bool Right() const { return m_asha_props.capabilities & 0x01; }
    bool Left() const { return !Right(); }
    void SubscribeExtra(/* callbacks? */);
 
@@ -105,11 +105,12 @@ private:
       Characteristic battery_10;
       Characteristic battery_100;
    } m_char;
+   Properties m_properties;
 
    std::string m_name;
    std::string m_alias;
    std::string m_mac;
-   Properties m_properties{};
+   AshaProps m_asha_props{};
 
    uint16_t m_psm_id = 0;
    int8_t m_volume = 0;

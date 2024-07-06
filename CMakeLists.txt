@@ -23,6 +23,7 @@ add_executable(asha_connection_test
    asha/RawHci.cxx
    asha/Side.cxx
    asha/GVariantDump.cxx
+   asha/Properties.cxx
 
    connect_test.cxx
 )
@@ -38,6 +39,7 @@ add_executable(asha_stream_test
    asha/Side.cxx
    asha/GVariantDump.cxx
    asha/RawHci.cxx
+   asha/Properties.cxx
 
    g722/g722_encode.c
 
@@ -60,6 +62,7 @@ add_executable(asha_pipewire_sink
    asha/RawHci.cxx
    asha/GattProfile.cxx
    asha/ObjectManager.cxx
+   asha/Properties.cxx
 
    g722/g722_encode.c
 

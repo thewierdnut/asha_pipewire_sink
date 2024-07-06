@@ -172,73 +172,17 @@ void Bluetooth::ProcessDevice(const std::string& path, GVariantIter* property_di
    while (g_variant_iter_loop(property_dict, "{sv}", &key, &value))
       ProcessDeviceProperty(device, key, value);
 
-   auto& iface = m_bluez_properties[path];
-   if (!iface)
-   {
-      GError* err = nullptr;
-      auto* piface = g_dbus_proxy_new_for_bus_sync(
-         G_BUS_TYPE_SYSTEM,
-         G_DBUS_PROXY_FLAGS_NONE,
-         nullptr,
-         "org.bluez",
-         path.c_str(),
-         "org.freedesktop.DBus.Properties",
-         nullptr,
-         &err
-      );
-      if (err)
-      {
-         g_error("Error getting dbus org.bluez Properties interface for %s: %s", path.c_str(), err->message);
-         g_error_free(err);
-      }
-      else
-      {
-         iface.reset(piface, g_object_unref);
-         
-         // Lambda doesn't work with G_CALLBACK
-         struct Callback {
-            static void Signal(GDBusProxy* p, gchar* sender, gchar* signal, GVariant* parameters, gpointer* user_data)
-            {
-               auto* self = (Bluetooth*)user_data;
-
-               if (g_str_equal(signal, "PropertiesChanged"))
-               {
-                  GVariantIter* it{};
-                  g_variant_get(parameters, "(sa{sv}as)", nullptr, &it, nullptr);
-                  std::shared_ptr<GVariantIter> pit(it, g_variant_iter_free);
-                  std::string path = g_dbus_proxy_get_object_path(p);
-                  auto& device = self->m_devices[path];
-                  gchar* key{};
-                  GVariant* value{};
-                  while (g_variant_iter_loop(it, "{sv}", &key, &value))
-                     self->ProcessDeviceProperty(device, key, value);
-               }
-               else
-               {
-                  std::stringstream ss;
-                  GVariantDump(parameters, ss);
-                  g_info("Device Signal %s::%s %s", sender, signal, ss.str().c_str());
-               }
-            }
-         };
-         // Despite the documentation, this doesn't seem to ever fire. g-signal works though.
-         // g_signal_connect(iface.get(),
-         //    "g-properties-changed",
-         //    G_CALLBACK(&Callback::PropertiesChanged),
-         //    this
-         // );
-
-         g_signal_connect(iface.get(),
-            "g-signal",
-            G_CALLBACK(&Callback::Signal),
-            this
-         );
-      }
-   }
+   auto& properties = m_bluez_properties[path] = Properties(path);
+   std::string path_closure = path;
+   properties.Subscribe([this, path_closure](const std::string& key, const std::shared_ptr<GVariant>& value){
+      auto& device = m_devices[path_closure];
+      if (value)
+         ProcessDeviceProperty(device, key.c_str(), value.get());
+   });
 }
 
 
-void Bluetooth::ProcessDeviceProperty(BluezDevice& device, const char* key, struct _GVariant* value)
+void Bluetooth::ProcessDeviceProperty(BluezDevice& device, const char* key, GVariant* value)
 {
    bool was_ready = device.resolved && device.connected;
    if (g_str_equal("Name", key))
@@ -349,6 +293,7 @@ void Bluetooth::PrepareAndAddDevice(BluezDevice& device)
    assert(device.resolved);
 
    device.characteristics.clear();
+   device.properties = Properties(device.path);
 
    // Fill out the device characteristics before we forward it to the callback.
    // TODO: Is there a more efficient way of doing this?

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Characteristic.hh"
+#include "Properties.hh"
 
 #include <cstdint>
 #include <functional>
@@ -31,6 +32,7 @@ public:
       bool resolved = false;
 
       std::vector<Characteristic> characteristics;
+      Properties properties;
    };
 
    typedef std::function<void(const BluezDevice&)> AddCallback;
@@ -52,8 +54,7 @@ private:
 
    std::shared_ptr<_GDBusProxy> m_bluez_objects;
    std::shared_ptr<_GDBusProxy> m_bluez_object_properties;
-   std::map<std::string, std::shared_ptr<_GDBusProxy>> m_bluez_properties;
-
+   std::map<std::string, Properties> m_bluez_properties;
    std::map<std::string, BluezDevice> m_devices;
 
    uint64_t m_signal_id = -1;

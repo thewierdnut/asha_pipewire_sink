@@ -1,6 +1,7 @@
 #include "Side.hh"
 
 #include "Config.hh"
+#include "GVariantDump.hh"
 #include "HexDump.hh"
 #include "RawHci.hh"
 
@@ -72,6 +73,18 @@ std::shared_ptr<Side> Side::CreateIfValid(const Bluetooth::BluezDevice& device)
       side->m_mac = device.mac;
       side->m_name = device.name;
       side->m_alias = device.alias;
+      side->m_properties = device.properties;
+      std::weak_ptr<Side> ws(side);
+      side->m_properties.Subscribe([ws](const std::string& key, const std::shared_ptr<GVariant>& value) {
+         auto side = ws.lock();
+         if (side)
+         {
+            if (value)
+               g_info("%s %s: %s", side->Description().c_str(), key.c_str(), GVariantDump(value.get()).c_str());
+            else
+               g_info("%s invalidated %s", side->Description().c_str(), key.c_str());
+         }
+      });
 
       side->m_interval = Config::Interval();
       side->m_timeout = Config::Timeout();
@@ -95,9 +108,9 @@ Side::~Side()
 
 std::string Side::Description() const
 {
-   if (m_properties.capabilities & CAPABILITY_BINAURAL)
+   if (m_asha_props.capabilities & CAPABILITY_BINAURAL)
    {
-      if (m_properties.capabilities & CAPABILITY_RIGHT_SIDE)
+      if (m_asha_props.capabilities & CAPABILITY_RIGHT_SIDE)
          return m_name + " (Right)";
       else
          return m_name + " (Left)";
@@ -116,10 +129,10 @@ bool Side::ReadProperties()
 {
    // Query the device properties.
    auto result = m_char.properties.Read();
-   if (result.size() < sizeof(m_properties))
+   if (result.size() < sizeof(m_asha_props))
       return false;
 
-   memcpy(&m_properties, result.data(), sizeof(m_properties));
+   memcpy(&m_asha_props, result.data(), sizeof(m_asha_props));
    return true;
 }
 
