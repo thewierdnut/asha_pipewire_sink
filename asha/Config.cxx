@@ -15,7 +15,7 @@ uint16_t Config::s_celength = 12;   // Units of 0.625ms
 int8_t Config::s_volume = -64;      // -128 (muted) to 0
 bool Config::s_phy1m = false;
 bool Config::s_phy2m = false;
-bool Config::s_reconnect = true;
+bool Config::s_reconnect = false;
 
 // Managing extra options (mostly for stream_test)
 std::string Config::s_description = "Implementation of ASHA streaming protocol for pipewire.";
@@ -84,8 +84,8 @@ void Config::ReadArgs(int argc, char** argv)
          s_phy2m = true;
       else if (0 == strcmp(argv[i], "--phy1m"))
          s_phy1m = true;
-      else if (0 == strcmp(argv[i], "--disable_reconnect"))
-         s_reconnect = false;
+      else if (0 == strcmp(argv[i], "--reconnect"))
+         s_reconnect = true;
       else if (s_extra.count(argv[i]))
       {
          auto& extra = s_extra[argv[i]];
@@ -110,7 +110,9 @@ void Config::HelpAndExit(const std::string& error)
              << "  --buffer_algorithm   One of (none, threaded, poll4, poll8, timed)\n"
              << "                       [Default: threaded]\n"
              << "  --volume             Stream volume from -128 to 0 [Default: -64]\n"
-             << "  --disable_reconnect  Disable the auto-reconnection mechanism\n";
+             << "  --reconnect          Enable the auto-reconnection mechanism. This uses the\n"
+             << "                       bluez gatt profile registration to auto-reconnect, which\n"
+             << "                       may require a bluetoothd restart to disable.\n";
    auto oldflags = std::cout.flags();
    for (auto& extra: s_extra)
    {
