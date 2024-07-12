@@ -74,6 +74,8 @@ add_executable(asha_pipewire_sink
 target_link_libraries(asha_pipewire_sink PkgConfig::GLIB PkgConfig::PIPEWIRE)
 
 
+add_executable(snoop_analyze snoop_analyze.cxx)
+
 # add_executable(monitor_test
 #    asha/BluetoothMonitor.cxx
 #    asha/Discover.cxx

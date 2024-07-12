@@ -18,7 +18,6 @@ void GVariantDump(GVariant* v, std::ostream& out, const std::string& whitespace)
    {
    //case G_VARIANT_CLASS_MAYBE: // TODO
    case G_VARIANT_CLASS_ARRAY:
-      // TODO: hexdump byte arrays?
       if (type[1] == '{') // Dictionary
       {
          gsize n = g_variant_n_children(v);
