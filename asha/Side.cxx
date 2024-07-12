@@ -257,27 +257,27 @@ bool Side::Reconnect()
    }
 
    // This requires CAP_NET_RAW
-   if (!hci.SendConnectionUpdate(m_interval, m_interval, m_latency, m_timeout, m_celen, m_celen))
-   {
-      // This failed (probably don't have requisite permissions). Extract the
-      // configured value using an unpriviledge request, and notify of that instead.
-      RawHci::SystemConfig config;
-      hci.ReadSysConfig(config);
-      if (config.max_conn_interval == config.min_conn_interval && config.max_conn_interval <= 16)
-         m_interval = config.min_conn_interval;
-      else
-      {
-         // This configuration isn't going to work.
-         g_warning("The currently configured connection paramters will not work. "
-                   "Please set these values in /etc/bluetooth/main.conf, and restart the bluetooth service.\n"
-                   "  [LE]\n"
-                   "  MinConnectionInterval=16\n"
-                   "  MaxConnectionInterval=16\n"
-                   "  ConnectionLatency=10\n"
-                   "  ConnectionSupervisionTimeout=100");
-      }
-   }
-   UpdateConnectionParameters(m_interval);
+   // if (!hci.SendConnectionUpdate(m_interval, m_interval, m_latency, m_timeout, m_celen, m_celen))
+   // {
+   //    // This failed (probably don't have requisite permissions). Extract the
+   //    // configured value using an unpriviledge request, and notify of that instead.
+   //    RawHci::SystemConfig config;
+   //    hci.ReadSysConfig(config);
+   //    if (config.max_conn_interval == config.min_conn_interval && config.max_conn_interval <= 16)
+   //       m_interval = config.min_conn_interval;
+   //    else
+   //    {
+   //       // This configuration isn't going to work.
+   //       g_warning("The currently configured connection paramters will not work. "
+   //                 "Please set these values in /etc/bluetooth/main.conf, and restart the bluetooth service.\n"
+   //                 "  [LE]\n"
+   //                 "  MinConnectionInterval=16\n"
+   //                 "  MaxConnectionInterval=16\n"
+   //                 "  ConnectionLatency=10\n"
+   //                 "  ConnectionSupervisionTimeout=100");
+   //    }
+   // }
+   // UpdateConnectionParameters(m_interval);
 
    return true;
 }

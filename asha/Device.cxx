@@ -85,6 +85,15 @@ void Device::Connect()
 {
    // Already holding pipewire thread lock.
    m_state = CONNECTED;
+   for (auto& kv: m_sides)
+   {
+      auto& side = kv.second;
+      if (!side->Connect())
+      {
+         g_error("Failed to connect to %s", side->Description().c_str());
+         continue;
+      }
+   }
 }
 
 
@@ -95,6 +104,14 @@ void Device::Disconnect()
    // Already holding pipewire thread lock.
    m_state = DISCONNECTED;
    Stop();
+   for (auto& kv: m_sides)
+   {
+      if (!kv.second->Disconnect())
+      {
+         g_error("Failed to disconnect from %s", kv.second->Description().c_str());
+         continue;
+      }
+   }
 }
 
 
@@ -117,17 +134,19 @@ void Device::Start()
    for (auto& kv: m_sides)
    {
       // This is what android does...
-      // bool otherstate = false;
-      // for (auto& okv: m_sides)
-      // {
-      //    if (kv.second == okv.second) continue;
-      //    otherstate |= okv.second->Ready();
-      // }
+      bool otherstate = false;
+      for (auto& okv: m_sides)
+      {
+         if (kv.second == okv.second) continue;
+         otherstate |= okv.second->Ready();
+      }
+      kv.second->Start(otherstate);
+
       // This seems more stable. The hearing devices seem to fight for control
       // of the stream for a moment if you don't just tell them beforehand that
       // they are both present.
-      bool otherstate = m_sides.size() > 1;
-      kv.second->Start(otherstate);
+      // bool otherstate = m_sides.size() > 1;
+      // kv.second->Start(otherstate);
    }
 }
 
@@ -267,28 +286,40 @@ void Device::SetExternalVolume(bool left, int8_t v)
 void Device::AddSide(const std::string& path, const std::shared_ptr<Side>& side)
 {
    g_info("Adding %s device to %s", side->Left() ? "left" : "right", Name().c_str());
-   side->SubscribeExtra();
+   // side->SubscribeExtra();
 
    // Called from dbus thread, needs to hold pw lock while modifying m_sides.
    auto lock = pw::Thread::Get()->Lock();
-   auto old_state = m_state;
+   // auto old_state = m_state;
+   // if (m_state == STREAMING)
+   //    Stop();
+
+   // if (side->Connect())
+   // {
+   //    for (auto& kv: m_sides)
+   //    {
+   //       kv.second->UpdateConnectionParameters(16); // TODO: get interval from the side that just connected and verify that they are the smame.
+   //       kv.second->UpdateOtherConnected(true);
+   //    }
+   //    m_sides.emplace_back(path, side);
+   // }
+   // else
+   //    g_warning("Failed to connect to %s", side->Description().c_str());
+
+   // if (old_state == STREAMING)
+   //    Start();
+
    if (m_state == STREAMING)
+   {
       Stop();
 
-   if (side->Connect())
-   {
-      for (auto& kv: m_sides)
-      {
-         kv.second->UpdateConnectionParameters(16); // TODO: get interval from the side that just connected and verify that they are the smame.
-         kv.second->UpdateOtherConnected(true);
-      }
-      m_sides.emplace_back(path, side);
-   }
-   else
-      g_warning("Failed to connect to %s", side->Description().c_str());
+      if (side->Connect())
+         m_sides.emplace_back(path, side);
+      else
+         g_error("Failed to connect to %s", side->Description().c_str());
 
-   if (old_state == STREAMING)
       Start();
+   }
 }
 
 
@@ -305,18 +336,23 @@ bool Device::RemoveSide(const std::string& path)
          // We need to stop the streaming thread so that it doesn't attempt
          // buffer delivery after we have deleted the side. First though, lets
          // remove it from m_sides so that we don't set a Stop() to it.
-         std::shared_ptr<asha::Side> to_delete(std::move(it->second));
-         m_sides.erase(it);
+         // std::shared_ptr<asha::Side> to_delete(std::move(it->second));
+         // m_sides.erase(it);
 
-         auto old_state = m_state;
-         if (m_state == STREAMING)
-            Stop();
+         // auto old_state = m_state;
+         // if (m_state == STREAMING)
+         //    Stop();
+
+         // for (auto& side: m_sides)
+         //    side.second->UpdateOtherConnected(false);
+
+         // if (old_state == STREAMING && !m_sides.empty())
+         //    Start();
+         // return true;
+         m_sides.erase(it);
 
          for (auto& side: m_sides)
             side.second->UpdateOtherConnected(false);
-
-         if (old_state == STREAMING && !m_sides.empty())
-            Start();
          return true;
       }
    }
