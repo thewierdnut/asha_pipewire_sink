@@ -5,9 +5,14 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <unordered_map>
 #include <vector>
+
+
+#include <dirent.h>
+#include <sys/stat.h>
 
 // No ntoh64 on my box :(
 template <typename T>
@@ -45,7 +50,7 @@ template <typename T>
 inline std::string Hex(const T& v)
 {
    std::stringstream ss;
-   ss << std::hex << std::setfill('0') << "0x" << std::setw(sizeof(T)*2) << (uint64_t)v;
+   ss << std::hex << std::setfill('0') << std::setw(sizeof(T)*2) << (uint64_t)v;
    return ss.str();
 }
 template <>
@@ -115,6 +120,23 @@ std::string ToString(const std::vector<uint8_t>& bytes)
    return ret;
 }
 
+struct StreamCids
+{
+   // TODO: A lot of the logic that uses this struct relies on the capture
+   //       being from the perspective of the central.
+   uint16_t rx = 0;
+   uint16_t tx = 0;
+
+   bool operator<(const StreamCids& o) const
+   {
+      return (rx == o.rx ? tx < o.tx : rx < o.rx);
+   }
+   bool operator==(const StreamCids& o) const
+   {
+      return rx == o.rx && tx == o.tx;
+   }
+};
+
 
 // Monitor snoop opcodes.
 static constexpr uint16_t NEW_INDEX = 0;
@@ -155,6 +177,14 @@ static const std::string GATT_CHARACTERISTICS  = "00002803-0000-1000-8000-00805f
 
 static const std::string GATT_CHAR_DESCRIPTION = "00002901-0000-1000-8000-00805f9b34fb";
 static const std::string GATT_CCC              = "00002902-0000-1000-8000-00805f9b34fb";
+
+static const std::string DEVICE_NAME           = "00002a00-0000-1000-8000-00805f9b34fb";
+
+static const std::string ASHA_READ_ONLY_PROPERTIES = "6333651e-c481-4a3e-9169-7c902aad37bb";
+static const std::string ASHA_AUDIO_CONTROL_POINT  = "f0d4de7e-4a88-476c-9d9f-1937b0996cc0";
+static const std::string ASHA_AUDIO_STATUS         = "38663f1a-e711-4cac-b641-326b56404837";
+static const std::string ASHA_VOLUME               = "00e4ca9e-ab14-41e4-8823-f9e70c7e91df";
+static const std::string ASHA_LE_PSM_OUT           = "2d410339-82b6-42aa-b34e-e2e01df8cc1a";
 
 const std::unordered_map<std::string, std::string> KNOWN_UUIDS = {
    { GATT_SERVICES, "Services"},
@@ -356,6 +386,265 @@ private:
    uint32_t m_type = 0;
 };
 
+struct GattCharacteristic
+{
+   uint16_t handle;
+   uint16_t value;
+   uint16_t ccc;
+   uint16_t description;
+   uint8_t properties;
+   std::string uuid;
+};
+struct GattService
+{
+   uint16_t handle;
+   uint16_t end_handle;
+
+   std::string uuid;
+};
+
+struct L2CapCreditConnection
+{
+   bool outgoing = false;
+   StreamCids cids{};
+   uint16_t psm = 0;
+   uint16_t mtu = 0; // Maximum pre-fragmented packet size
+   uint16_t mps = 0; // Maximum fragment size
+   int32_t tx_credits = 0;
+};
+
+
+class BtDatabase final
+{
+public:
+   BtDatabase()
+   {
+      // First, try to load the bluez database. This requires root access though.
+      LoadPath("/var/lib/bluetooth");
+      // Next, try to load anything we have stored locally, so that we can
+      // cache any mac addesses we find in snoop files.
+      std::string home = getenv("HOME");
+      LoadPath(home + "/.local/share/snoop_analyze");
+   }
+   ~BtDatabase()
+   {
+      // Dump the database to our local cache.
+      std::string home = getenv("HOME");
+      mkdir((home + "/.local/share/snoop_analyze").c_str(), 0770);
+      mkdir((home + "/.local/share/snoop_analyze/cache").c_str(), 0770);
+      for (auto& kv: m_info)
+      {
+         std::ofstream out(home + "/.local/share/snoop_analyze/cache/" + kv.first);
+
+         // Index everything first so that we can output the interleaved data
+         // with the handles in order.
+         std::vector<std::pair<const GattService*, const GattCharacteristic*>> idx;
+         idx.reserve(65536);
+         for (auto& s: kv.second.services)
+         {
+            if (idx.size() <= s.handle)
+               idx.resize(s.handle + 1);
+            idx[s.handle].first = &s;
+         }
+         for (auto& c: kv.second.characteristics)
+         {
+            if (idx.size() <= c.handle)
+               idx.resize(c.handle + 1);
+            idx[c.handle].second = &c;
+         }
+         out << "[Attributes]\n";
+         for (size_t i = 0; i < idx.size(); ++i)
+         {
+            if (idx[i].first)
+               out << Hex((uint16_t)i) << "=2800:" << Hex(idx[i].first->end_handle) << ":" << idx[i].first->uuid << '\n';
+            else if (idx[i].second)
+            {
+               auto& c = *idx[i].second;
+               out << Hex((uint16_t)i) << "=2803:" << Hex(c.value) << ":" << Hex(c.properties) << ":" << c.uuid << '\n';
+               if (c.ccc)
+                  out << Hex(c.ccc) << "=" << GATT_CCC << '\n';
+               if (c.description)
+                  out << Hex(c.description) << "=" << GATT_CHAR_DESCRIPTION << '\n';
+            }
+         }
+      }
+   }
+
+   const std::vector<GattService>& Services(const std::string& mac) const
+   {
+      static std::vector<GattService> empty;
+      auto it = m_info.find(mac);
+      return it == m_info.end() ? empty : it->second.services;
+   }
+
+   const std::vector<GattCharacteristic>& Characteristics(const std::string& mac) const
+   {
+      static std::vector<GattCharacteristic> empty;
+      auto it = m_info.find(mac);
+      return it == m_info.end() ? empty : it->second.characteristics;
+   }
+
+   void CacheService(const std::string& mac, const GattService& service)
+   {
+      auto& info = m_info[mac];
+      for (auto& old_service: info.services)
+      {
+         if (old_service.uuid == service.uuid)
+         {
+            old_service = service;
+            return;
+         }
+      }
+      info.services.push_back(service);
+   }
+
+   void CacheCharacteristic(const std::string& mac, const GattCharacteristic& characteristic)
+   {
+      auto& info = m_info[mac];
+      for (auto& old_char: info.characteristics)
+      {
+         if (old_char.uuid == characteristic.uuid)
+         {
+            old_char = characteristic;
+            return;
+         }
+      }
+      info.characteristics.push_back(characteristic);
+   }
+
+private:
+   void LoadPath(const std::string& path)
+   {
+      // Recursively search all directories for the "cache" directory, then
+      // parse all mac address-named files in it.
+      bool cache = path.size() > 5 && path.substr(path.size() - 5) == "cache";
+      std::shared_ptr<DIR> d(opendir(path.c_str()), closedir);
+      if (d)
+      {
+         struct dirent* de{};
+         while ((de = readdir(d.get())))
+         {
+            if (de->d_name[0] == '.')
+               continue;
+            else if (de->d_type == DT_DIR)
+               LoadPath(path + "/" + de->d_name);
+            else if (cache && de->d_type == DT_REG)
+            {
+               // Is this filename a mac address?
+               bool ismac = de->d_name[17] == 0; // Has to be 17 chars long.
+               for (size_t i = 0; i < 17 && ismac; ++i)
+               {
+                  if (i % 3 == 2)
+                     ismac = de->d_name[i] == ':';
+                  else
+                     ismac = isxdigit(de->d_name[i]);
+               }
+               if (ismac)
+                  LoadDatabase(path + "/" + de->d_name, de->d_name);
+            }
+         }
+      }
+   }
+   void LoadDatabase(const std::string& path, const std::string& mac)
+   {
+      std::vector<GattService> services;
+      std::vector<GattCharacteristic> characteristics;
+
+      // These are in glib's keyfile format. Kind of like ini files.
+      auto split = [](const std::string& s, char c) {
+         std::vector<std::string> ret;
+         size_t pos = 0;
+         size_t char_pos = s.find(c);
+         while (char_pos != std::string::npos)
+         {
+            ret.push_back(s.substr(pos, char_pos - pos));
+            pos = char_pos + 1;
+            char_pos = s.find(c, pos);
+         }
+         ret.push_back(s.substr(pos));
+         return ret;
+      };
+      std::ifstream in(path);
+      std::string line;
+      std::string section;
+      while (std::getline(in, line))
+      {
+         // Strip trailing whitespace.
+         while (!line.empty() && std::isspace(line.back()))
+            line.pop_back();
+         // Comment character only allowed on the front.
+         if (line.empty() || line.front() == '#')
+            continue;
+
+         if (line.front() == '[' && line.back() == ']')
+            section = line.substr(1, line.size() - 2);
+         else if (section == "Attributes")
+         {
+            size_t eqpos = line.find('=');
+            if (eqpos == std::string::npos)
+               continue; // Broken File?
+            std::string key = line.substr(0, eqpos);
+            auto values = split(line.substr(eqpos+1), ':');
+
+            // service:        2800:end:uuid
+            // secondary svc:  2801:end:uuid
+            // include:        2802:start:end:uuid
+            // characteristic: 2803:value handle:properties:uuid
+            // descriptor:     ext_props:uuid_str
+            // descriptor:     uuid_str
+            uint16_t handle = std::stoul(key, nullptr, 16);
+            if (values.size() == 1)
+            {
+               // Descriptor for the most recently read characteristic.
+               assert(!characteristics.empty());
+               if (characteristics.empty())
+                  continue;
+               if (values.front() == GATT_CCC)
+                  characteristics.back().ccc = handle;
+               else if (values.front() == GATT_CHAR_DESCRIPTION)
+                  characteristics.back().description = handle;
+            }
+            else if (values.front() == "2800" || values.front() == "2801")
+            {
+               assert(values.size() == 3);
+               if (values.size() != 3)
+                  continue;
+               uint16_t end_handle = std::stoul(values[1], nullptr, 16);
+               services.push_back(GattService{handle, end_handle, values[2]});
+            }
+            else if (values.front() == "2802")
+               throw std::runtime_error("Please implement includes");
+            else if (values.front() == "2803")
+            {
+               assert(values.size() == 4);
+               if (values.size() != 4)
+                  continue;
+               uint16_t value_handle = std::stoul(values[1], nullptr, 16);
+               uint8_t properties = std::stoul(values[2], nullptr, 16);
+               characteristics.push_back(GattCharacteristic{handle, value_handle, 0, 0, properties, values[3]});
+            }
+            // else we don't care? or don't support?
+
+         }
+         // else We don't care about other sections.
+      }
+
+      std::string mac_lower;
+      for (char c: mac) mac_lower.push_back(std::tolower(c));
+      auto& info = m_info[mac_lower];
+      info.services = std::move(services);
+      info.characteristics = std::move(characteristics);
+   }
+
+private:
+   struct CacheInfo
+   {
+      std::vector<GattService> services;
+      std::vector<GattCharacteristic> characteristics;
+   };
+   std::map<std::string, CacheInfo> m_info;
+};
+
 class BtParser final
 {
 public:
@@ -388,29 +677,14 @@ public:
    std::function<void(uint16_t connection_handle, uint16_t handle, const std::vector<uint8_t>& bytes)> Read;
    std::function<void(uint16_t connection_handle, uint16_t handle, uint8_t code)> FailedWrite;
    std::function<void(uint16_t connection_handle, uint16_t handle, uint8_t code)> FailedRead;
+   std::function<void(uint16_t connection_handle, uint16_t status, const L2CapCreditConnection& info)> NewCreditConnection;
+   std::function<void(uint16_t connection_handle, bool rx, const L2CapCreditConnection& info, const uint8_t* data, size_t len)> Data;
 
 
 
-
-   struct GattCharacteristic
-   {
-      uint16_t handle;
-      uint16_t value;
-      uint16_t ccc;
-      uint16_t description;
-      uint8_t properties;
-      std::string uuid;
-   };
-   struct GattService
-   {
-      uint16_t handle;
-      uint16_t end_handle;
-
-      std::string uuid;
-   };
    struct HandleInfo
    {
-      enum {INVALID, SERVICE, SERVICE_CHANGED, CHAR, CHAR_CCC, CHAR_DESCRIPTION, CHAR_VALUE, CHAR_DESCRIPTOR} type = INVALID;
+      enum {INVALID, SERVICE, CHAR, CHAR_CCC, CHAR_DESCRIPTION, CHAR_VALUE, CHAR_DESCRIPTOR} type = INVALID;
       uint16_t handle = 0;
       GattService* service = nullptr;
       GattCharacteristic* characteristic = nullptr;
@@ -427,9 +701,8 @@ public:
       for (auto& s: conn.services)
       {
          if (s.first == handle) return HandleInfo{HandleInfo::SERVICE, handle, &s.second};
-         if (s.second.end_handle == handle) return HandleInfo{HandleInfo::SERVICE_CHANGED, handle, &s.second};
 
-         if (s.second.handle < handle && handle < s.second.end_handle)
+         if (s.second.handle < handle && handle <= s.second.end_handle)
          {
             pservice = &s.second;
             break;
@@ -439,11 +712,25 @@ public:
       // Then check the characteristics.
       for (auto& c: conn.characteristic)
       {
+         if (pservice && (pservice->handle > c.first || pservice->end_handle < c.first))
+            continue;
          if (c.first == handle) return HandleInfo{HandleInfo::CHAR, handle, pservice, &c.second};
          if (c.second.ccc == handle) return HandleInfo{HandleInfo::CHAR_CCC, handle, pservice, &c.second};
          if (c.second.description == handle) return HandleInfo{HandleInfo::CHAR_DESCRIPTION, handle, pservice, &c.second};
          if (c.second.value == handle) return HandleInfo{HandleInfo::CHAR_VALUE, handle, pservice, &c.second};
          // TODO: handle other descriptor types.
+      }
+
+
+
+      // TODO: I'm not sure how, but bluez seems to infer the ccc
+      //       descriptor handles for the service changed characteristic
+      for (auto& c: conn.characteristic)
+      {
+         if (pservice && (pservice->handle > c.first || pservice->end_handle < c.first))
+            continue;
+         if ((c.second.value + 1 == handle) && c.second.uuid == "00002a05-0000-1000-8000-00805f9b34fb")
+            return HandleInfo{HandleInfo::CHAR_CCC, handle, pservice, &c.second};
       }
       return HandleInfo{};
    }
@@ -462,7 +749,6 @@ public:
       switch (info.type)
       {
       case HandleInfo::SERVICE:           return UuidStr(info.service->uuid);
-      case HandleInfo::SERVICE_CHANGED:   return UuidStr(info.service->uuid) + " onchange";
       case HandleInfo::CHAR:              return UuidStr(info.characteristic->uuid);
       case HandleInfo::CHAR_CCC:          return UuidStr(info.characteristic->uuid) + " ccc";
       case HandleInfo::CHAR_DESCRIPTION:  return UuidStr(info.characteristic->uuid) + " description";
@@ -557,6 +843,12 @@ protected:
          if (ConnectionCallback)
             ConnectionCallback(handle, status, conn.mac, conn.interval, conn.latency, conn.timeout);
          
+         // Load any cached services and characteristics.
+         for (auto& s: m_db.Services(conn.mac))
+            conn.services[s.handle] = s;
+         for (auto& c: m_db.Characteristics(conn.mac))
+            conn.characteristic[c.handle] = c;
+
          break;
       }
       case 0x0a:     // LE Enhanced Connection Complete
@@ -580,6 +872,12 @@ protected:
          conn.phy = m_pending_connection.phy & 2 ? ConnectionInfo::PHY2M : ConnectionInfo::PHY1M;
          if (ConnectionCallback)
             ConnectionCallback(conn.handle, status, conn.mac, conn.interval, conn.latency, conn.timeout);
+
+         // Load any cached services and characteristics.
+         for (auto& s: m_db.Services(conn.mac))
+            conn.services[s.handle] = s;
+         for (auto& c: m_db.Characteristics(conn.mac))
+            conn.characteristic[c.handle] = c;
       
          break;
       }
@@ -610,6 +908,22 @@ protected:
             RemoteFeatures(handle, flags);
          break;
       }
+      case 0x0c:     // PHY update complete
+      {
+         BtBufferStream b = pkt.Sub("PHY update complete");
+         uint8_t status = b.U8();
+         uint16_t handle = b.U16();
+         uint8_t tx = b.U8();
+         uint8_t rx = b.U8();
+         auto& conn = m_connections[handle];
+         if (tx == 1)
+            conn.phy = ConnectionInfo::PHY1M;
+         else if (tx == 2)
+            conn.phy = ConnectionInfo::PHY2M;
+         else
+            conn.phy = ConnectionInfo::PHY_UNKNOWN;
+         break;
+      }
       }
    }
 
@@ -621,7 +935,7 @@ protected:
       }
    }
 
-   void FindInformationResponse(uint16_t connection_handle, BtBufferStream b)
+   void FindInformationResponse(bool rx, uint16_t connection_handle, BtBufferStream b)
    {
       uint8_t format = b.U8();
       if (format != 1 && format != 2) // 16 bit / 128 bit uuids
@@ -634,7 +948,7 @@ protected:
       for (size_t i = 0; i < count; ++i)
       {
          BtBufferStream binfo = b.Sub("Information Data", response_size);
-         uint16_t handle = binfo.U8();
+         uint16_t handle = binfo.U16();
          std::string uuid = format == 1 ? binfo.UUID16() : binfo.UUID128();
 
          // I'm a little fuzzy on how to find the correct handle here. The
@@ -652,6 +966,7 @@ protected:
                it->second.description = handle;
             else if (uuid == GATT_CCC)
                it->second.ccc = handle;
+            m_db.CacheCharacteristic(conn.mac, it->second);
             if (Descriptor)
                Descriptor(connection_handle, it->first, handle, uuid);
 
@@ -659,21 +974,20 @@ protected:
       }
    }
 
-   void ReadByTypeResponse(uint16_t connection_handle, bool group, BtBufferStream b)
+   void ReadByTypeResponse(bool rx, uint16_t connection_handle, bool group, BtBufferStream b)
    {
       uint8_t response_size = b.U8();
       size_t attribute_count = response_size == 0 ? 0 : b.Size() / response_size;
 
       auto& conn = m_connections[connection_handle];
-
+      auto& current_uuid = conn.pending[!rx].current_uuid;
       for (size_t i = 0; i < attribute_count; ++i)
       {
          // If response_size was invalid here, then attribute count would be zero.
          BtBufferStream rsp = b.Sub(group ? "Read By Type" : "Read By Group Type", response_size);
          uint16_t handle = rsp.U16();
          uint16_t end_handle = group ? rsp.U16() : 0;
-         
-         if (conn.current_uuid == GATT_SERVICES)
+         if (current_uuid == GATT_SERVICES)
          {
             std::string uuid = rsp.UUID();
 
@@ -681,10 +995,12 @@ protected:
             service.handle = handle;
             service.end_handle = end_handle;
             service.uuid = uuid;
+            m_db.CacheService(conn.mac, service);
             if (Service)
                Service(connection_handle, handle, end_handle, uuid);
+            
          }
-         else if (conn.current_uuid == GATT_CHARACTERISTICS)
+         else if (current_uuid == GATT_CHARACTERISTICS)
          {
             uint8_t properties = rsp.U8(); // bitmask (Extended, authenticated writes, indicate, notify, write, command, read, broadcast)
             uint16_t value_handle = rsp.U16();
@@ -695,14 +1011,15 @@ protected:
             characteristic.value = value_handle;
             characteristic.properties = properties;
             characteristic.uuid = uuid;
+            m_db.CacheCharacteristic(conn.mac, characteristic);
             if (Characteristic)
                Characteristic(connection_handle, handle, value_handle, properties, uuid);
          }
       }
-      conn.current_uuid.clear();
+      current_uuid.clear();
    }
 
-   void AttributeError(uint16_t handle, BtBufferStream b)
+   void AttributeError(bool rx, uint16_t handle, BtBufferStream b)
    {
       auto& conn = m_connections[handle];
       uint8_t original_method = b.U8() & 0x3f;
@@ -711,50 +1028,50 @@ protected:
       switch (original_method)
       {
       case 0x11: // Read by group type request
-         conn.current_uuid.clear(); // error means we are done reading these.
+         conn.pending[!rx].current_uuid.clear(); // error means we are done reading these.
          break;
       case 0x0a: // Read
-         assert(conn.pending_handle == handle_in_error); // remove later, just making sure I did this right;
          if (FailedRead)
-            FailedRead(handle, conn.pending_handle, error_code);
-         conn.pending_handle = 0;
+            FailedRead(handle, conn.pending[!rx].handle, error_code);
+         conn.pending[!rx].handle = 0;
          break;
       case 0x12: // Write
-         assert(conn.pending_handle == handle_in_error); // remove later, just making sure I did this right;
+         assert(conn.pending[!rx].handle == handle_in_error); // remove later, just making sure I did this right;
          if (FailedWrite)
-            FailedWrite(handle, conn.pending_handle, error_code);
-         conn.pending_handle = 0;
+            FailedWrite(handle, conn.pending[!rx].handle, error_code);
+         conn.pending[!rx].handle = 0;
          break;
       }
    }
    
-   void WriteRequest(uint16_t handle, BtBufferStream b)
+   void WriteRequest(bool rx, uint16_t handle, BtBufferStream b)
    {
       uint16_t write_handle = b.U16();
-      m_connections[handle].pending_handle = write_handle;
+      m_connections[handle].pending[rx].handle = write_handle;
       if (Write)
          Write(handle, write_handle, std::vector<uint8_t>(b.Data(), b.Data() + b.Size()));
    }
 
-   void WriteResponse(uint16_t handle, BtBufferStream b)
+   void WriteResponse(bool rx, uint16_t handle, BtBufferStream b)
    {
       // b should be empty. This is a successful write.
    }
 
-   void ReadRequest(uint16_t handle, BtBufferStream b)
+   void ReadRequest(bool rx, uint16_t handle, BtBufferStream b)
    {
-      m_connections[handle].pending_handle = b.U16();
+      m_connections[handle].pending[rx].handle = b.U16();
    }
 
-   void ReadResponse(uint16_t handle, BtBufferStream b)
+   void ReadResponse(bool rx, uint16_t handle, BtBufferStream b)
    {
       auto& conn = m_connections[handle];
-      if (conn.pending_handle)
+      auto& pending_handle = conn.pending[!rx].handle;
+      if (pending_handle)
       {
          if (Read)
-            Read(handle, conn.pending_handle, std::vector<uint8_t>(b.Data(), b.Data() + b.Size()));
+            Read(handle, pending_handle, std::vector<uint8_t>(b.Data(), b.Data() + b.Size()));
 
-         conn.pending_handle = 0;
+         pending_handle = 0;
       }
    }
 
@@ -769,42 +1086,160 @@ protected:
       switch(method)
       {
       case 0x01: // Error response
-         AttributeError(handle, b.Sub("Attribute Error Response", 4));
+         AttributeError(rx, handle, b.Sub("Attribute Error Response", 4));
          break;
       case 0x02: // Exchange MTU Request. Fallthrough intentional
       case 0x03: // Exchange MTU Response
          (rx ? conn.peripheral_mtu : conn.central_mtu) = b.Sub("Exchange MTU").U16();
          break;
       case 0x05: // Find Information Response
-         FindInformationResponse(handle, b.Sub("Find Information Response"));
+         FindInformationResponse(rx, handle, b.Sub("Find Information Response"));
          break;
       case 0x08: // Read by type request. Fallthrough intentional
       case 0x10: // Read by group type request
       {
          BtBufferStream bg = b.Sub("Read By Type Request");
          bg.Skip(4); // Starting/ending handle.
-         conn.current_uuid = bg.UUID();
+         conn.pending[rx].current_uuid = bg.UUID();
          break;
       }
       case 0x09: // Read By Type Response
-         ReadByTypeResponse(handle, false, b.Sub("Read By Type Response"));
+         ReadByTypeResponse(rx, handle, false, b.Sub("Read By Type Response"));
          break;
       case 0x11: // Read By Group Type Response
-         ReadByTypeResponse(handle, true, b.Sub("Read By Group Type Response"));
+         ReadByTypeResponse(rx, handle, true, b.Sub("Read By Group Type Response"));
          break;
       case 0x12: // Write Request
-         WriteRequest(handle, b.Sub("Write Request"));
+         WriteRequest(rx, handle, b.Sub("Write Request"));
          break;
       case 0x13: // Write Response
-         WriteResponse(handle, b.Sub("Write Response"));
+         WriteResponse(rx, handle, b.Sub("Write Response"));
          break;
       case 0x0a: // Read Request
-         ReadRequest(handle, b.Sub("Read Request"));
+         ReadRequest(rx, handle, b.Sub("Read Request"));
          break;
       case 0x0b: // Read Response
-         ReadResponse(handle, b.Sub("Read Response"));
+         ReadResponse(rx, handle, b.Sub("Read Response"));
          break;
       }
+   }
+
+   void ParseLECreditConnectionRequest(bool rx, uint16_t handle, uint8_t id, BtBufferStream b)
+   {
+      uint16_t psm = b.U16();
+      uint16_t cid = b.U16();
+      uint16_t mtu = b.U16();
+      uint16_t mps = b.U16();
+      uint16_t credits = b.U16();
+      auto& conn = m_connections[handle];
+      const uint16_t zero = 0;
+      conn.pending[rx].ecred[id] = L2CapCreditConnection{
+         .outgoing = !rx,
+         .cids = StreamCids{.rx = rx ? cid : zero, .tx = rx ? zero : cid, },
+         .psm = psm,
+         .mtu = mtu,
+         .mps = mps,
+         .tx_credits = rx ? zero : credits,
+      };
+   }
+   void ParseLECreditConnectionResponse(bool rx, uint16_t handle, uint8_t id, BtBufferStream b)
+   {
+      uint16_t cid = b.U16();
+      uint16_t mtu = b.U16();
+      uint16_t mps = b.U16();
+      uint16_t credits = b.U16();
+      uint16_t result = b.U16();
+      auto& conn = m_connections[handle];
+      const uint16_t zero = 0;
+      auto pending = conn.pending[!rx].ecred[id];
+      if (rx)
+      {
+         pending.outgoing = true;
+         pending.cids.rx = cid;
+         pending.tx_credits = credits;
+      }
+      else
+      {
+         pending.outgoing = false;
+         pending.cids.tx = cid;
+      }
+      if (pending.mps)
+         pending.mps = std::min(mps, pending.mps);
+      else
+         pending.mps = mps;
+      if (pending.mtu)
+         pending.mtu = std::min(mtu, pending.mtu);
+      else
+         pending.mtu = mtu;
+      
+      if (result == 0)
+         conn.ecred[pending.cids] = pending;
+
+      if (NewCreditConnection)
+         NewCreditConnection(handle, result, pending);
+
+      conn.pending[!rx].ecred.erase(id);
+   }
+   void ParseLECreditConnectionAddCredit(bool rx, uint16_t handle, uint8_t id, BtBufferStream b)
+   {
+      uint16_t cid = b.U16();
+      uint16_t credits = b.U16();
+      auto& conn = m_connections[handle];
+      for (auto& kv: conn.ecred)
+      {
+         // This seems odd to me, but the credit is sent *from* the relevant
+         // cid, not to the cid of the other side of the connection.
+         if (rx && kv.first.tx == cid)
+         {
+            kv.second.tx_credits += credits;
+            // std::cout << "+Credits: " << Hex(handle) << " " << Hex(kv.second.tx_cid) << " " << kv.second.tx_credits << '\n';
+            break;
+         }
+      }
+   }
+
+   void ParseL2CapSignal(bool rx, uint16_t handle, BtBufferStream b)
+   {
+      uint8_t code = b.U8();
+      uint8_t id = b.U8();
+      uint16_t length = b.U16();
+      switch (code)
+      {
+      case 0x14: ParseLECreditConnectionRequest(rx, handle, id, b.Sub("LE Credit Based Connection Request", length)); break;
+      case 0x15: ParseLECreditConnectionResponse(rx, handle, id, b.Sub("LE Credit Based Connection Response", length)); break;
+      case 0x16: ParseLECreditConnectionAddCredit(rx, handle, id, b.Sub("LE Flow Control Credit")); break;
+      }
+   }
+
+   void ParseLECreditConnectionData(bool rx, uint16_t handle, L2CapCreditConnection& conn, BtBufferStream b)
+   {
+      if (!rx)
+      {
+         // TODO: If this is zero, we shouldn't have sent this. Its more likely
+         //       we didn't parse this correctly though.
+         assert(conn.tx_credits > 0);
+         --conn.tx_credits;
+      }
+
+      if (Data)
+         Data(handle, rx, conn, b.Data(), b.Size());
+   }
+
+   void ParseL2CapDynamicData(bool rx, uint16_t handle, uint16_t cid, BtBufferStream b)
+   {
+      auto& conn = m_connections[handle];
+      // Is this a known LE credit based connection?
+      for (auto& kv: conn.ecred)
+      {
+         if ((rx ? kv.first.rx : kv.first.tx) == cid)
+         {
+            ParseLECreditConnectionData(rx, handle, kv.second, b.Sub("LE Credit Based Connection Payload"));
+            break;
+         }
+      }
+
+      // Heuristic... If this is exactly 161 bytes long, its probably asha data
+      // in a credit-based CoC
    }
    
    void AclPkt(bool rx, BtBufferStream pkt)
@@ -815,34 +1250,39 @@ protected:
       uint16_t boundary = (header >> 12) & 0x3;
       uint16_t broadcast = (header >> 14) & 0x3;
       
-      auto it = m_connections.find(handle);
-      if (it == m_connections.end())
-         return; // We don't have the context necessary to understand this packet.
-      if (it->second.type == ConnectionInfo::L2CAP)
+      auto& conn = m_connections[handle];
+      if (conn.type == ConnectionInfo::CONN_UNKNOWN)
+      {
+         // This was default initialized, which means we missed the connection
+         // negotiation. For now, just assume L2CAP
+         conn.type = ConnectionInfo::L2CAP;
+      }
+      
+      if (conn.type == ConnectionInfo::L2CAP)
       {
          BtBufferStream b = pkt.Sub("L2CAP", length);
          std::vector<uint8_t> fragment_data;
          // length is already correct.
-         if (it->second.fragment.empty())
+         if (conn.pending[rx].fragment.empty())
          {
             if (b.Size() < 4)
                throw std::runtime_error("Truncated TX L2CAP packet header");
             // Peek at packet length in stream
-            it->second.expected_fragment_size = BtSwap(*(uint16_t*)(b.Data() + 0)) + 4;
-            if (it->second.expected_fragment_size > b.Size())
+            conn.pending[rx].expected_fragment_size = BtSwap(*(uint16_t*)(b.Data() + 0)) + 4;
+            if (conn.pending[rx].expected_fragment_size > b.Size())
             {
-               it->second.fragment.assign(b.Data(), b.Data() + length);
+               conn.pending[rx].fragment.assign(b.Data(), b.Data() + length);
                return; // Need to wait for more data.
             }
          }
          else
          {
-            it->second.fragment.insert(it->second.fragment.end(), b.Data(), b.Data() + b.Size());
-            if (it->second.fragment.size() < it->second.expected_fragment_size)
+            conn.pending[rx].fragment.insert(conn.pending[rx].fragment.end(), b.Data(), b.Data() + b.Size());
+            if (conn.pending[rx].fragment.size() < conn.pending[rx].expected_fragment_size)
                return; // Need to wait for more data.
-            fragment_data.swap(it->second.fragment);
+            fragment_data.swap(conn.pending[rx].fragment);
             b = BtBufferStream("L2CAP", fragment_data.data(), fragment_data.size());
-            length = it->second.expected_fragment_size;
+            length = conn.pending[rx].expected_fragment_size;
          }
          uint16_t l2cap_length = b.U16();
          uint16_t cid = b.U16();
@@ -853,17 +1293,25 @@ protected:
          case 0x0004: // Attribute Protocol
             ParseAttribute(rx, handle, b.Sub("Attribute Protocol"));
             break;
+         case 0x0005: // LE L2CAP Signaling Channel
+            ParseL2CapSignal(rx, handle, b.Sub("LE L2CAP Signaling Channel"));
+            break;
+         default:
+            ParseL2CapDynamicData(rx, handle, cid, b.Sub("L2CAP Dynamic Channel"));
+            break;
          }
       }
    }
 
 private:
+   BtDatabase m_db;
+
    struct ConnectionInfo
    {
       uint16_t handle = 0;
-      enum {NONE, L2CAP, LE_SOCKET} type = NONE;
+      enum {CONN_UNKNOWN, L2CAP} type = CONN_UNKNOWN;
       std::string mac;
-      enum {PHY1M, PHY2M} phy{};
+      enum {PHY_UNKNOWN, PHY1M, PHY2M} phy{};
       uint16_t interval = 0;
       uint16_t latency = 0;
       uint16_t timeout = 0;
@@ -878,13 +1326,16 @@ private:
 
       std::map<uint16_t, GattService> services;
       std::map<uint16_t, GattCharacteristic> characteristic;
-      
+      std::map<StreamCids, L2CapCreditConnection> ecred;
 
       // These variables represent temporary state while parsing.
-      std::string current_uuid;        // UUID for group read requests
-      std::vector<uint8_t> fragment;   // Reassembled l2cap fragment.
-      uint16_t expected_fragment_size = 0;
-      uint16_t pending_handle = 0;
+      struct {
+         std::string current_uuid;        // UUID for group read requests
+         std::vector<uint8_t> fragment;   // Reassembled l2cap fragment.
+         uint16_t expected_fragment_size = 0;
+         uint16_t handle = 0;
+         std::map<uint8_t, L2CapCreditConnection> ecred;
+      } pending[2];
    };
    std::unordered_map<uint16_t, ConnectionInfo> m_connections;
 
@@ -902,7 +1353,6 @@ private:
       } p1m, p2m;
    };
    PendingConnectionInfo m_pending_connection;
-
 };
 
 
@@ -919,7 +1369,26 @@ int main(int argc, char** argv)
 
    BtSnoopFile snoop(argc > 1 ? infile : std::cin);
 
-   // Make a first pass through the file, trying to find relevant uuids.
+   struct DeviceInfo
+   {
+      uint16_t psm = 0;
+      std::string description;
+      enum {UNKNOWN, MONO, LEFT, RIGHT} side = UNKNOWN;
+      uint64_t hisync;
+   };
+   std::map<uint16_t, DeviceInfo> device_info;
+
+   struct StreamInfo
+   {
+      uint16_t device = 0;
+      StreamCids cids{};
+      DeviceInfo* dinfo = nullptr;
+      StreamInfo* other = nullptr;
+
+      int64_t credits = 0;
+   };
+   std::map<std::pair<uint16_t, StreamCids>, StreamInfo> asha_streams;
+
    BtParser parser;
    parser.NoteCallback = [](const std::string& s) {
       std::cout << "System Note: " << s << '\n';
@@ -959,6 +1428,43 @@ int main(int argc, char** argv)
    };
    parser.Read = [&](uint16_t connection, uint16_t handle, const std::vector<uint8_t>& bytes) {
       std::cout << "Read:           " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << ToString(bytes) << '\n';
+      auto info = parser.FindHandle(connection, handle);
+      if (info.characteristic)
+      {
+         if (info.characteristic->uuid == ASHA_LE_PSM_OUT && bytes.size() == 2)
+         {
+            device_info[connection].psm = bytes[0] | (bytes[1] << 8);
+            std::cout << "   PSM: " << device_info[connection].psm << '\n';
+         }
+         else if (info.characteristic->uuid == DEVICE_NAME)
+         {
+            device_info[connection].description = std::string(bytes.begin(), bytes.end()).c_str();
+            std::cout << "   Name: " << device_info[connection].description << '\n';
+         }
+         else if (info.characteristic->uuid == ASHA_READ_ONLY_PROPERTIES && bytes.size() == 17)
+         {
+            BtBufferStream props("ASHA_READ_ONLY_PROPERTIES", bytes.data(), bytes.size());
+            uint8_t version = props.U8();
+            uint8_t caps = props.U8();
+            uint64_t hisync = props.U64();
+            uint8_t features = props.U8();
+            uint8_t delay = props.U16();
+            props.Skip(2); // Reserved
+            uint16_t codecs = props.U16();
+            
+            if (version == 1)
+            {
+
+               if ((caps & 2) == 0)
+                  device_info[connection].side = DeviceInfo::MONO;
+               else
+                  device_info[connection].side = (caps & 1 ) ? DeviceInfo::RIGHT : DeviceInfo::LEFT;
+
+               device_info[connection].hisync = hisync;
+               std::cout << "   Props: " << ((caps & 2) ? "stereo " : "mono ") << ((caps & 1) ? "right " : "left ") << Hex(hisync) << '\n';
+            }
+         }
+      }
    };
    parser.FailedWrite = [&](uint16_t connection, uint16_t handle, uint8_t code) {
       std::cout << "Failed Write:   " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << code << '\n';
@@ -966,6 +1472,67 @@ int main(int argc, char** argv)
    parser.FailedRead = [&](uint16_t connection, uint16_t handle, uint8_t code) {
       std::cout << "Failed Read:    " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << code << '\n';
    };
+   parser.NewCreditConnection = [&](uint16_t connection, uint16_t status, const L2CapCreditConnection& info) {
+      if (status)
+         std::cout << "Failed CoC:     " << Hex(connection) << " PSM: " << Hex(info.psm) << " Status: " << status << '\n';
+      else
+      {
+         auto& dinfo = device_info[connection];
+         if (dinfo.psm == info.psm && info.outgoing)
+         {
+            switch (dinfo.side)
+            {
+            case DeviceInfo::LEFT:    std::cout << "Left Stream:    "; break;
+            case DeviceInfo::RIGHT:   std::cout << "Right Stream:   "; break;
+            case DeviceInfo::MONO:    std::cout << "Mono Stream:    "; break;
+            case DeviceInfo::UNKNOWN: std::cout << "Unknown Stream: "; break;
+            }
+            
+            auto& sinfo = asha_streams[std::make_pair(connection, info.cids)];
+            sinfo.cids = info.cids;
+            sinfo.device = connection;
+            sinfo.dinfo = &dinfo;
+
+            for (auto& oinfo: asha_streams)
+            {
+               if (oinfo.second.device != connection && oinfo.second.dinfo && oinfo.second.dinfo->hisync == dinfo.hisync)
+               {
+                  sinfo.other = &oinfo.second;
+                  oinfo.second.other = &sinfo;
+                  break;
+               }
+            }
+         }
+         else
+            std::cout << "New CoC:        ";
+      
+         std::cout << Hex(connection) << " PSM: " << Hex(info.psm) << " MTU: " << info.mtu << " MPS: " << info.mps << " Credits: " << info.tx_credits << '\n';
+      }
+   };
+   parser.Data = [&](uint16_t connection, bool rx, const L2CapCreditConnection& info, const uint8_t* data, size_t len)
+   {
+      // std::cout << "Data:        " << (rx ? ">> " : "<< ") << Hex(connection) << " " << info.tx_credits << " " << len << "bytes\n";
+      auto itinfo = asha_streams.find(std::make_pair(connection, info.cids));
+      if (itinfo != asha_streams.end())
+      {
+         itinfo->second.credits = info.tx_credits;
+         if (itinfo->second.other)
+         {
+            assert(itinfo->second.dinfo && itinfo->second.other->dinfo);
+            if (itinfo->second.dinfo)
+            {
+               auto& left = itinfo->second.dinfo->side == DeviceInfo::LEFT ? itinfo->second : *itinfo->second.other;
+               auto& right = itinfo->second.dinfo->side == DeviceInfo::LEFT ? *itinfo->second.other : itinfo->second;
+               std::cout << "Stereo:      " << (rx ? ">> " : "<< ") << Hex(connection) << " " << std::setw(4) << left.credits - right.credits << " " << len << " bytes\n";
+            }
+         }
+         else
+         {
+            std::cout << "Mono:        " << (rx ? ">> " : "<< ") << Hex(connection) << " " << info.tx_credits << " " << len << "bytes\n";
+         }
+      }
+   };
+
 
    uint64_t frame_idx = 0;
    while (true)
