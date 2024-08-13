@@ -47,7 +47,7 @@ void Config::ReadArgs(int argc, char** argv)
       {
          HelpAndExit("Invalid " + argname + " specified on command line.");
       }
-      if (ret < -128 || ret > 0)
+      if (ret < min || ret > max)
          HelpAndExit(argname + " must be in the range " + std::to_string(min) + " to " +std::to_string(max));
       return ret;
    };
