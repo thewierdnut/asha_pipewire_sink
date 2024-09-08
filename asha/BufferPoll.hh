@@ -26,15 +26,6 @@ public:
    BufferPoll(DataCallback cb): Buffer(cb) {}
    virtual ~BufferPoll() override {}
 
-   virtual void Start() override
-   {
-      m_startup = true;
-      m_write = 0;
-      m_read = 0;
-   }
-
-   virtual void Stop() override {}
-
    virtual RawS16* NextBuffer() override
    {
       if (!m_startup)

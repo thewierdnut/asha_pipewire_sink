@@ -17,8 +17,6 @@ public:
    BufferNone(DataCallback cb):Buffer(cb) {}
    virtual ~BufferNone() override {}
 
-   virtual void Start() override {}
-   virtual void Stop() override {}
    virtual RawS16* NextBuffer() override { return &m_buffer; }
    virtual void SendBuffer() override
    {

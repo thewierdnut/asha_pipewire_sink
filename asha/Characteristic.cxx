@@ -23,13 +23,17 @@ Characteristic::Characteristic(const std::string& uuid, const std::string& path)
    m_uuid(uuid),
    m_path(path)
 {
-
+   m_cancellable.reset(g_cancellable_new(), g_object_unref);
 }
+
 
 Characteristic::~Characteristic()
 {
+   if (m_cancellable)
+      g_cancellable_cancel(m_cancellable.get());
    StopNotify();
 }
+
 
 Characteristic& Characteristic::operator=(const Characteristic& o)
 {
@@ -41,7 +45,7 @@ Characteristic& Characteristic::operator=(const Characteristic& o)
 }
 
 
-std::vector<uint8_t> Characteristic::Read()
+void Characteristic::Read(std::function<void(const std::vector<uint8_t>&)> cb)
 {
    // Args needs to be a tuple containing dict options. (dbus dicts are arrays
    // of key/value pairs).
@@ -57,34 +61,26 @@ std::vector<uint8_t> Characteristic::Read()
    // reference", and be prepared to get very, very angry.
    g_variant_ref_sink(args.get());
 
-   GError* e = nullptr;
-   auto result = Call(READ_VALUE, args);
-
-   if (!result)
-      return {};
-
-   if (!g_variant_check_format_string(result.get(), "(ay)", false))
-   {
-      g_warning("Incorrect type signature when reading %s: %s", m_path.c_str(), g_variant_get_type_string(result.get()));
-      return {};
-   }
-
-   gsize length = 0;
-   std::shared_ptr<GVariant> ay(g_variant_get_child_value(result.get(), 0), g_variant_unref);
-   guint8* data = (guint8*)g_variant_get_fixed_array(ay.get(), &length, sizeof(guint8));
-
-
-   std::vector<uint8_t> ret(data, data + length);
-
-   ay.reset();
-   result.reset();
-   args.reset();
-
-
-   return ret;
+   Call(READ_VALUE, args, [=](const std::shared_ptr<GVariant>& result){
+      if (result)
+      {
+         if (!g_variant_check_format_string(result.get(), "(ay)", false))
+         {
+            g_warning("Incorrect type signature when reading characteristic: %s", g_variant_get_type_string(result.get()));
+         }
+         else if (cb)
+         {
+            gsize length = 0;
+            std::shared_ptr<GVariant> ay(g_variant_get_child_value(result.get(), 0), g_variant_unref);
+            guint8* data = (guint8*)g_variant_get_fixed_array(ay.get(), &length, sizeof(guint8));
+            std::vector<uint8_t> ret(data, data + length);
+            cb(ret);
+         }
+      }
+   });
 }
 
-bool Characteristic::Write(const std::vector<uint8_t>& bytes)
+void Characteristic::Write(const std::vector<uint8_t>& bytes, std::function<void(bool)> cb)
 {
    // Args is a tuple containing a byte aray and the dict options.
    GVariantBuilder b = G_VARIANT_BUILDER_INIT(G_VARIANT_TYPE("a{sv}"));
@@ -101,18 +97,17 @@ bool Characteristic::Write(const std::vector<uint8_t>& bytes)
    // reference", and be prepared to get very, very angry.
    g_variant_ref_sink(args.get());
 
-   GError* e = nullptr;
-   auto result = Call(WRITE_VALUE, args);
-
-   if (!result)
-      return false;
-
-   if (!g_variant_check_format_string(result.get(), "()", false))
-   {
-      g_warning("Incorrect type signature when reading %s: %s", m_path.c_str(), g_variant_get_type_string(result.get()));
-      return false;
-   }
-   return true;
+   Call(WRITE_VALUE, args, [=](const std::shared_ptr<GVariant>& result){
+      if (result)
+      {
+         if (!g_variant_check_format_string(result.get(), "()", false))
+            g_warning("Incorrect type signature when writing characteristic: %s", g_variant_get_type_string(result.get()));
+         if (cb)
+            cb(true);
+      }
+      else if (cb)
+         cb(false);
+   });
 }
 
 bool Characteristic::Command(const std::vector<uint8_t>& bytes)
@@ -132,82 +127,70 @@ bool Characteristic::Command(const std::vector<uint8_t>& bytes)
    // reference", and be prepared to get very, very angry.
    g_variant_ref_sink(args.get());
 
-   GError* e = nullptr;
-   auto result = Call(WRITE_VALUE, args);
+   Call(WRITE_VALUE, args);
 
-   if (!result)
-      return false;
-
-   if (!g_variant_check_format_string(result.get(), "()", false))
-   {
-      g_warning("Incorrect type signature when reading %s: %s", m_path.c_str(), g_variant_get_type_string(result.get()));
-      return false;
-   }
    return true;
 }
 
-bool Characteristic::Notify(std::function<void(const std::vector<uint8_t>&)> fn)
+void Characteristic::Notify(std::function<void(const std::vector<uint8_t>&)> fn)
 {
-   // No args for the dbus call.
+   StopNotify();
 
-   GError* e = nullptr;
-   auto result = Call(START_NOTIFY);
-
-   if (!result)
-      return false;
-
-   if (!g_variant_check_format_string(result.get(), "()", false))
+   // lambda doesn't work with typecasts required for slots.
+   typedef void(*NotifyCallback)(GDBusProxy* self, GVariant* changed_properties, char** invalidated_properties, gpointer user_data);
+   static NotifyCallback cb = (NotifyCallback)[](GDBusProxy* self, GVariant* changed_properties, char** invalidated_properties, gpointer user_data)
    {
-      g_warning("Incorrect return type signature for %s: %s", m_path.c_str(), g_variant_get_type_string(result.get()));
-      return false;
-   }
-
-   // lambda doesn't work here for some reason.
-   struct Call
-   {
-      static void Back(GDBusProxy* self, GVariant* changed_properties, char** invalidated_properties, gpointer user_data)
+      std::stringstream ss;
+      ss << changed_properties;
+      auto* characteristic = (Characteristic*)user_data;
+      // g_info("Property %s notified: %s", characteristic->m_uuid.c_str(), ss.str().c_str());
+      
+      if (!g_variant_check_format_string(changed_properties, "a{sv}", false))
       {
-         std::stringstream ss;
-         ss << changed_properties;
-         auto* characteristic = (Characteristic*)user_data;
-         // g_info("Property %s notified: %s", characteristic->m_uuid.c_str(), ss.str().c_str());
-         
-         if (!g_variant_check_format_string(changed_properties, "a{sv}", false))
-         {
-            g_warning("Incorrect type signature when changed property %s: %s", characteristic->m_path.c_str(), g_variant_get_type_string(changed_properties));
-            return;
-         }
-
-         GVariant* value = g_variant_lookup_value(changed_properties, "Value", G_VARIANT_TYPE_BYTESTRING);
-         if (!value)
-         {
-            // I don't think this is an error, but it isn't what we are
-            // watching for.
-            return;
-         }
-         std::shared_ptr<GVariant> pvalue(value, g_variant_unref);
-
-         if (!g_variant_check_format_string(value, "ay", false))
-         {
-            g_warning("Changed Value is not a byte array for %s: %s", characteristic->m_path.c_str(), g_variant_get_type_string(value));
-            return;
-         }
-
-         gsize length = 0;
-         const guint8* data = (const guint8*)g_variant_get_fixed_array(value, &length, sizeof(guint8));
-
-         std::vector<uint8_t> ret(data, data + length);
-         characteristic->m_notify_callback(std::vector<uint8_t>(data, data + length));
+         g_warning("Incorrect type signature when changed property %s: %s", characteristic->m_path.c_str(), g_variant_get_type_string(changed_properties));
+         return;
       }
-   };
 
-   m_notify_callback = fn;
-   m_notify_handler_id = g_signal_connect(m_char.get(),
-      "g-properties-changed",
-      G_CALLBACK(&Call::Back),
-      this
-   );
-   return true;
+      GVariant* value = g_variant_lookup_value(changed_properties, "Value", G_VARIANT_TYPE_BYTESTRING);
+      if (!value)
+      {
+         // I don't think this is an error, but it isn't what we are
+         // watching for.
+         return;
+      }
+      std::shared_ptr<GVariant> pvalue(value, g_variant_unref);
+
+      if (!g_variant_check_format_string(value, "ay", false))
+      {
+         g_warning("Changed Value is not a byte array for %s: %s", characteristic->m_path.c_str(), g_variant_get_type_string(value));
+         return;
+      }
+
+      gsize length = 0;
+      const guint8* data = (const guint8*)g_variant_get_fixed_array(value, &length, sizeof(guint8));
+
+      std::vector<uint8_t> ret(data, data + length);
+      characteristic->m_notify_callback(std::vector<uint8_t>(data, data + length));
+   };
+   
+   
+   Call(START_NOTIFY, nullptr, [this, fn](const std::shared_ptr<GVariant>& result){
+      if (result)
+      {
+         if (!g_variant_check_format_string(result.get(), "()", false))
+         {
+            g_warning("Incorrect return type signature when subscribing to %s notifications: %s", m_uuid.c_str(), g_variant_get_type_string(result.get()));
+            return;
+         }
+         m_notify_callback = fn;
+         m_notify_handler_id = g_signal_connect(m_char.get(),
+            "g-properties-changed",
+            G_CALLBACK(cb),
+            this
+         );
+
+      }
+   });
 }
 
 
@@ -249,39 +232,42 @@ void Characteristic::CreateProxyIfNotAlreadyCreated() noexcept
 }
 
 
-std::shared_ptr<_GVariant> Characteristic::Call(const char* fname, const std::shared_ptr<_GVariant>& args) noexcept
+void Characteristic::Call(const char* fname, const std::shared_ptr<GVariant>& args, std::function<void(const std::shared_ptr<GVariant>&)> cb) noexcept
 {
    CreateProxyIfNotAlreadyCreated();
 
    if (m_char)
    {
-      GError* e = nullptr;
-      // Cannot directly capture result into a shared_ptr because the shared_ptr
-      // will happily delete a null pointer, which g_variant_unref does not like.
-      GVariant* result = g_dbus_proxy_call_sync(m_char.get(),
-         fname,
-         args.get(),
-         G_DBUS_CALL_FLAGS_NONE,
-         -1,
-         nullptr,
-         &e
-      );
-      if (e)
+      struct CallbackContext
       {
-         // TODO: knowing the severity of the error here depends on context
-         g_warning("Error calling %s: %s", fname, e->message);
-         g_error_free(e);
-      }
-      if (result)
-      {
-         // Convert from floating reference to a full reference.
-         return std::shared_ptr<GVariant>(result, g_variant_unref);
-      }
-      else
-      {
-         g_warning("Null result when calling %s", fname);
-      }
-   }
+         std::string fname;
+         std::string uuid;
+         std::function<void(const std::shared_ptr<GVariant>&)> cb;
+      };
 
-   return nullptr;
+      g_dbus_proxy_call(m_char.get(), fname, args.get(), G_DBUS_CALL_FLAGS_NONE, 5000,
+         m_cancellable.get(),
+         [](GObject* proxy, GAsyncResult* res, gpointer data) {
+            CallbackContext* cc = (CallbackContext*)data;
+            std::unique_ptr<CallbackContext> ccdeleter(cc);
+            GError* e = nullptr;
+            GVariant* result = g_dbus_proxy_call_finish((GDBusProxy*)proxy, res, &e);
+            if (e)
+            {
+               // TODO: knowing the severity of the error here depends on context
+               g_warning("Error calling %s(%s): %s", cc->fname.c_str(), cc->uuid.c_str(), e->message);
+               g_error_free(e);
+               if (cc->cb)
+                  cc->cb(nullptr);
+            }
+            if (result)
+            {
+               std::shared_ptr<GVariant> p(result, g_variant_unref);
+               if (cc->cb)
+                  cc->cb(p);
+            }
+         },
+         new CallbackContext{fname, m_uuid, cb}
+      );
+   }
 }

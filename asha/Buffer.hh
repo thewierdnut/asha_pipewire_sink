@@ -21,8 +21,6 @@ public:
    static std::shared_ptr<Buffer> Create(DataCallback cb);
    virtual ~Buffer() { }
 
-   virtual void Start() = 0;
-   virtual void Stop() = 0;
    virtual RawS16* NextBuffer() = 0;
    virtual void SendBuffer() = 0;
 

@@ -18,8 +18,6 @@ public:
    BufferTimed(DataCallback cb):Buffer(cb) {}
    virtual ~BufferTimed() override {}
 
-   virtual void Start() override {}
-   virtual void Stop() override {}
    virtual RawS16* NextBuffer() override { return &m_buffer; }
    virtual void SendBuffer() override;
 

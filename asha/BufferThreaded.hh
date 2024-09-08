@@ -21,11 +21,11 @@ namespace asha
 class BufferThreaded: public Buffer
 {
 public:
-   BufferThreaded(DataCallback cb):Buffer(cb) {}
+   BufferThreaded(DataCallback cb):Buffer(cb) { Start(); }
    virtual ~BufferThreaded() override { Stop(); }
 
-   virtual void Start() override;
-   virtual void Stop() override;
+   void Start();
+   void Stop();
    virtual RawS16* NextBuffer() override;
    virtual void SendBuffer() override;
 

@@ -15,7 +15,7 @@ void BufferTimed::SendBuffer()
    if (t - m_stamp > ASHA_STREAM_DEPTH)
    {
       // We have missed 8 packets, so the stream should be empty. Preload with
-      // six packets of silence, then send the available audio as the fifth.
+      // six packets of silence, then send the available audio as the sixth.
       for (size_t i = 0; i < 6; ++i)
       {
          if (m_data_cb(SILENCE))

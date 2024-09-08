@@ -7,6 +7,10 @@
 #include <vector>
 
 struct _GTimer;
+struct _GSocket;
+struct _GSource;
+struct _GCancellable;
+struct _GError;
 
 namespace asha
 {
@@ -18,11 +22,10 @@ constexpr uint16_t CODEC_G722_16KHZ = 0x02;
 // Hidden/unsupported in android. Not supported here either
 // constexpr uint16_t CODEC_G722_24KHZ = 0x04;
 
-class Side final
+class Side: public std::enable_shared_from_this<Side>
 {
 public:
    enum Status {STATUS_OK = 0, UNKNOWN_COMMAND = -1, ILLEGAL_PARAMTER = -2, CALL_FAILED = -128};
-   
    
    
    struct AshaProps
@@ -37,40 +40,36 @@ public:
    } __attribute__((packed));
 
    // Is this necessary? android always marks this as unknown.
-   enum PlaybackType { UNKNOWN = 0, RINGTONE = 1, PHONECALL = 2, MEDIA = 3 };
    enum WriteStatus { WRITE_OK, DISCONNECTED, BUFFER_FULL, NOT_READY, TRUNCATED, OVERSIZED };
 
    static std::shared_ptr<Side> CreateIfValid(const Bluetooth::BluezDevice& device);
 
-   ~Side();
+   virtual ~Side();
 
    std::string Description() const;
    std::string Mac() const { return m_mac; }
-   Status ReadStatus();
-   bool ReadProperties();
+
    const AshaProps& GetProperties() const { return m_asha_props; }
    bool Right() const { return m_asha_props.capabilities & 0x01; }
    bool Left() const { return !Right(); }
    void SubscribeExtra(/* callbacks? */);
 
-   bool Disconnect();
-   bool Connect();
-   bool Reconnect();
-   void SetStreamVolume(int8_t volume);
-   void SetExternalVolume(uint8_t volume);
+   virtual void SetStreamVolume(int8_t volume);
+   virtual void SetExternalVolume(uint8_t volume);
    // Start playback. The callback is called once the device is ready to receive.
-   bool Start(bool otherstate);
-   bool Stop();
-   WriteStatus WriteAudioFrame(const AudioPacket& packet);
-   void ReadFromAudioSocket();
-   bool UpdateOtherConnected(bool connected);
-   bool UpdateConnectionParameters(uint8_t interval);
+   virtual bool Start(bool otherstate, std::function<void(bool)> OnDone);
+   virtual bool Stop(std::function<void(bool)> OnDone);
+   virtual WriteStatus WriteAudioFrame(const AudioPacket& packet);
+   virtual bool UpdateOtherConnected(bool connected);
+   virtual bool UpdateConnectionParameters(uint8_t interval);
 
    const std::string& Name() const { return m_name; }
    const std::string& Alias() const { return m_alias; }
-   bool Ready() const { return m_ready_to_receive_audio; }
+   
+   enum SideState {INIT, STOPPED, WAITING_FOR_READY, READY, WAITING_FOR_STOP};
+   SideState State() const { return m_state; }
 
-   int Sock() const { return m_sock; }
+   int Sock() const;
 
    // Must be called before Connect()
    void SetConnectionParameters(uint16_t interval, uint16_t latency, uint16_t timeout, uint16_t celen)
@@ -81,15 +80,43 @@ public:
       m_celen = celen;
    }
 
+   void SetOnConnectionReady(std::function<void()> ready);
+
+protected:
+   // Used by unit test mock.
+   Side(const std::string& name): m_name(name), m_alias(name) {}
+   void SetProps(bool left, uint64_t hisync)
+   {
+      m_asha_props = AshaProps{
+         .version = 1,
+         .capabilities = (uint8_t)(left ? 2 : 3),
+         .hi_sync_id = hisync,
+         .feature_map = 1,
+         .render_delay = 160,
+         .codecs = 2
+      };
+   }
+   void SetState(SideState s) { m_state = s; }
+
+   void OnStatusNotify(const std::vector<uint8_t>& data);
+   void OnHAPropChanged(const std::vector<uint8_t>& data);
+   void OnBattery(uint8_t percent);
+   void OnExternalVolume(uint8_t value);
+
 private:
    Side() {}
    bool EnableStatusNotifications();
    bool DisableStatusNotifications();
 
-   void OnStatusNotify(const std::vector<uint8_t>& data);
-   void OnHAStatus(const std::vector<uint8_t>& data);
-   void OnBattery(uint8_t percent);
-   void OnExternalVolume(uint8_t value);
+   void ReadPSM();
+   void ReadProperties();
+   bool Disconnect();
+   bool Connect();
+   bool Reconnect();
+
+   void ConnectSucceeded();
+   void ConnectFailed(const struct _GError* err);
+   void ConnectionReady();
 
    struct
    {
@@ -111,14 +138,21 @@ private:
    std::string m_alias;
    std::string m_mac;
    AshaProps m_asha_props{};
+   bool m_asha_props_valid = false;
 
    uint16_t m_psm_id = 0;
    int8_t m_volume = 0;
-   int m_sock = -1;
+   // int m_sock = -1;
+   std::shared_ptr<_GSocket> m_sock;
+   std::shared_ptr<_GSource> m_sock_source;
+   std::shared_ptr<_GCancellable> m_sock_cancellable;
+   std::function<void()> m_OnConnectionReady;
+   bool m_connection_ready = false;
+   bool m_ready_to_receive_audio = false;
+   unsigned int m_connect_failed_timeout = -1;
+   SideState m_state = INIT;
 
    bool m_status_notify_enabled = false;
-   bool m_ready_to_receive_audio = false;
-
    std::function<void(Status)> m_next_status_fn;
 
    // Need CAP_NET_RAW to set these

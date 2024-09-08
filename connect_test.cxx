@@ -1,5 +1,6 @@
 #include "asha/Bluetooth.hh"
 #include "asha/Config.hh"
+#include "asha/Device.hh"
 #include "asha/RawHci.hh"
 #include "asha/Side.hh"
 
@@ -19,7 +20,7 @@ class ConnectTest
 public:
    ConnectTest():
       m_b(
-         [this](const asha::Bluetooth::BluezDevice& d) { OnAddDevice(d); },
+         [this](const asha::Bluetooth::BluezDevice& d) { OnAddSide(d); },
          [this](const std::string& p) { OnRemoveDevice(p); }
       )
    {
@@ -27,62 +28,83 @@ public:
    }
 
 protected:
-   void OnAddDevice(const asha::Bluetooth::BluezDevice& d)
+   void OnAddSide(const asha::Bluetooth::BluezDevice& d)
    {
-      std::shared_ptr<asha::Side> side = asha::Side::CreateIfValid(d);
-      if (side && side->ReadProperties())
+      // Called when we get a new device.
+      auto side = asha::Side::CreateIfValid(d);
+      if (side)
       {
-         auto& props = side->GetProperties();
+         g_info("Adding %s", d.path.c_str());
 
-         g_info("%s", side->Description().c_str());
-         g_info("    Name:      %s", side->Name().c_str());
-         g_info("    Mac:       %s", side->Mac().c_str());
-         g_info("    HiSyncId:  %lu", props.hi_sync_id);
-         if (side->Name() != side->Alias())
-            g_info("    Alias:     %s", side->Alias().c_str());
-         g_info("    Side:      %s %s",
-            ((props.capabilities & 0x01) ? "right" : "left"),
-            ((props.capabilities & 0x02) ? "(binaural)" : "(monaural)"));
-         g_info("    Delay:     %hu ms", props.render_delay);
-         g_info("    Streaming: %s", (props.feature_map & 0x01 ? "supported" : "not supported" ));
-         std::string codecs;
-         if (props.codecs & 0x02)
-            codecs += " G.722@16kHz";
-         if (props.codecs & 0x04)
-            codecs += " G.722@24kHz";
-         g_info("    Codecs:   %s", codecs.c_str());
-         bool connected = side->Connect();
-         g_info("    Connected: %s", connected ? "true" : "false");
+         std::weak_ptr<asha::Side> weak_side = side;
+         std::string path = d.path;
+         m_sides.emplace(path, side);
 
-         m_devices[d.path] = side;
-
-         // sockopts
-         CheckConnInfo(side);
-         // BT_SECURITY? returns BT_SECURITY_* constants, plus key size.
-         // BT_DEFER_SETUP? meant for listening sockets.
-         // BT_FLUSHABLE? gets the FLAG_FLUSHABLE flag
-         // BT_POWER? gets FLAG_FORCE_ACTIVE flag
-         CheckMTU(side);
-         CheckPHY(side);
-         CheckMODE(side);
-
-         // Raw socket ioctls
-         RawHci hci_connection(side->Mac(), side->Sock());
-         CheckHciConnInfo(hci_connection);
-         CheckCfgDefaults(hci_connection);
+         // TODO: Do we need to handle a timeout in case the device never becomes
+         //       ready? For now, I'm assuming that a timeout means a missing
+         //       device, and bluez will call OnRemoveDevice later.
+         side->SetOnConnectionReady([this, path, weak_side](){
+            auto side = weak_side.lock();
+            if (side)
+               SideReady(path, side);
+         });
       }
       else
       {
          g_info("%s is not an asha-enabled device", d.name.c_str());
       }
    }
+
+   void SideReady(const std::string& path, const std::shared_ptr<asha::Side>& side)
+   {
+      auto& props = side->GetProperties();
+
+      g_info("%s", side->Description().c_str());
+      g_info("    Name:      %s", side->Name().c_str());
+      g_info("    Mac:       %s", side->Mac().c_str());
+      g_info("    HiSyncId:  %lu", props.hi_sync_id);
+      if (side->Name() != side->Alias())
+         g_info("    Alias:     %s", side->Alias().c_str());
+      g_info("    Side:      %s %s",
+         ((props.capabilities & 0x01) ? "right" : "left"),
+         ((props.capabilities & 0x02) ? "(binaural)" : "(monaural)"));
+      g_info("    Delay:     %hu ms", props.render_delay);
+      g_info("    Streaming: %s", (props.feature_map & 0x01 ? "supported" : "not supported" ));
+      std::string codecs;
+      if (props.codecs & 0x02)
+         codecs += " G.722@16kHz";
+      if (props.codecs & 0x04)
+         codecs += " G.722@24kHz";
+      g_info("    Codecs:   %s", codecs.c_str());
+
+      // sockopts
+      CheckConnInfo(side);
+      // BT_SECURITY? returns BT_SECURITY_* constants, plus key size.
+      // BT_DEFER_SETUP? meant for listening sockets.
+      // BT_FLUSHABLE? gets the FLAG_FLUSHABLE flag
+      // BT_POWER? gets FLAG_FORCE_ACTIVE flag
+      CheckMTU(side);
+      CheckPHY(side);
+      CheckMODE(side);
+
+      // Raw socket ioctls
+      RawHci hci_connection(side->Mac(), side->Sock());
+      CheckHciConnInfo(hci_connection);
+   CheckCfgDefaults(hci_connection);
+
+      if (!m_devices[props.hi_sync_id])
+         m_devices[props.hi_sync_id].reset(new asha::Device(side->Name()));
+      m_devices[props.hi_sync_id]->AddSide(path, side);
+   }
    void OnRemoveDevice(const std::string& path)
    {
-      auto it = m_devices.find(path);
-      if (it != m_devices.end())
+      auto it = m_sides.find(path);
+      if (it != m_sides.end())
       {
          g_info("Removing %s", it->second->Description().c_str());
-         m_devices.erase(it);
+         m_sides.erase(it);
+         for (auto& kv: m_devices)
+            kv.second->RemoveSide(path);
       }
    }
 
@@ -291,12 +313,12 @@ protected:
          g_info("    ConnectionSupervisionTimeout=100");
          g_info("You will need to restart bluez when you are done");
       }
-
    }
 
 
 private:
-   std::map<std::string, std::shared_ptr<asha::Side>> m_devices;
+   std::map<uint64_t, std::shared_ptr<asha::Device>> m_devices;
+   std::map<std::string, std::shared_ptr<asha::Side>> m_sides;
 
    asha::Bluetooth m_b; // needs to be last
 };

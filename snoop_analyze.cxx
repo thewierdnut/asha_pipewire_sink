@@ -434,6 +434,9 @@ public:
       mkdir((home + "/.local/share/snoop_analyze/cache").c_str(), 0770);
       for (auto& kv: m_info)
       {
+         if (kv.first.empty() || kv.first == s_default_mac)
+            continue; // Don't dump empty or defaulted macs to the database.
+
          std::ofstream out(home + "/.local/share/snoop_analyze/cache/" + kv.first);
 
          // Index everything first so that we can output the interleaved data
@@ -470,23 +473,30 @@ public:
       }
    }
 
+   static void SetDefaultMac(const std::string& mac)
+   {
+      s_default_mac.clear();
+      for (auto c: mac)
+         s_default_mac.push_back(std::tolower(c));
+   }
+
    const std::vector<GattService>& Services(const std::string& mac) const
    {
       static std::vector<GattService> empty;
-      auto it = m_info.find(mac);
+      auto it = m_info.find(mac.empty() ? s_default_mac : mac);
       return it == m_info.end() ? empty : it->second.services;
    }
 
    const std::vector<GattCharacteristic>& Characteristics(const std::string& mac) const
    {
       static std::vector<GattCharacteristic> empty;
-      auto it = m_info.find(mac);
+      auto it = m_info.find(mac.empty() ? s_default_mac : mac);
       return it == m_info.end() ? empty : it->second.characteristics;
    }
 
    void CacheService(const std::string& mac, const GattService& service)
    {
-      auto& info = m_info[mac];
+      auto& info = m_info[mac.empty() ? s_default_mac : mac];
       for (auto& old_service: info.services)
       {
          if (old_service.uuid == service.uuid)
@@ -500,7 +510,7 @@ public:
 
    void CacheCharacteristic(const std::string& mac, const GattCharacteristic& characteristic)
    {
-      auto& info = m_info[mac];
+      auto& info = m_info[mac.empty() ? s_default_mac : mac];
       for (auto& old_char: info.characteristics)
       {
          if (old_char.uuid == characteristic.uuid)
@@ -643,7 +653,11 @@ private:
       std::vector<GattCharacteristic> characteristics;
    };
    std::map<std::string, CacheInfo> m_info;
+
+   static std::string s_default_mac;
 };
+
+std::string BtDatabase::s_default_mac;
 
 class BtParser final
 {
@@ -678,7 +692,7 @@ public:
    std::function<void(uint16_t connection_handle, uint16_t handle, uint8_t code)> FailedWrite;
    std::function<void(uint16_t connection_handle, uint16_t handle, uint8_t code)> FailedRead;
    std::function<void(uint16_t connection_handle, uint16_t status, const L2CapCreditConnection& info)> NewCreditConnection;
-   std::function<void(uint16_t connection_handle, bool rx, const L2CapCreditConnection& info, const uint8_t* data, size_t len)> Data;
+   std::function<void(uint16_t connection_handle, bool rx, const L2CapCreditConnection& info, const uint8_t* data, size_t len, size_t fragment_count)> Data;
 
 
 
@@ -693,6 +707,18 @@ public:
    HandleInfo FindHandle(uint16_t connection, uint16_t handle)
    {
       auto& conn = m_connections[connection];
+
+    
+      if (conn.services.empty())
+      {
+         for (auto& s: m_db.Services(""))
+            conn.services[s.handle] = s;
+      }
+      if (conn.characteristic.empty())
+      {
+         for (auto& c: m_db.Characteristics(""))
+            conn.characteristic[c.handle] = c;
+      }
 
       GattService* pservice = nullptr;
 
@@ -1220,9 +1246,9 @@ protected:
          assert(conn.tx_credits > 0);
          --conn.tx_credits;
       }
-
+      auto& base_conn = m_connections[handle];
       if (Data)
-         Data(handle, rx, conn, b.Data(), b.Size());
+         Data(handle, rx, conn, b.Data(), b.Size(), base_conn.pending[rx].fragment_count);
    }
 
    void ParseL2CapDynamicData(bool rx, uint16_t handle, uint16_t cid, BtBufferStream b)
@@ -1269,6 +1295,7 @@ protected:
                throw std::runtime_error("Truncated TX L2CAP packet header");
             // Peek at packet length in stream
             conn.pending[rx].expected_fragment_size = BtSwap(*(uint16_t*)(b.Data() + 0)) + 4;
+            conn.pending[rx].fragment_count = 1;
             if (conn.pending[rx].expected_fragment_size > b.Size())
             {
                conn.pending[rx].fragment.assign(b.Data(), b.Data() + length);
@@ -1277,6 +1304,7 @@ protected:
          }
          else
          {
+            ++conn.pending[rx].fragment_count;
             conn.pending[rx].fragment.insert(conn.pending[rx].fragment.end(), b.Data(), b.Data() + b.Size());
             if (conn.pending[rx].fragment.size() < conn.pending[rx].expected_fragment_size)
                return; // Need to wait for more data.
@@ -1332,6 +1360,7 @@ private:
       struct {
          std::string current_uuid;        // UUID for group read requests
          std::vector<uint8_t> fragment;   // Reassembled l2cap fragment.
+         size_t fragment_count = 0;
          uint16_t expected_fragment_size = 0;
          uint16_t handle = 0;
          std::map<uint8_t, L2CapCreditConnection> ecred;
@@ -1360,14 +1389,39 @@ private:
 int main(int argc, char** argv)
 {
    std::string snoop_filename;
-   if (argc > 1)
-      snoop_filename = argv[1];
+   for (int i = 1; i < argc; ++i)
+   {
+      std::string k = argv[i];
+      std::string v = i + 1 < argc ? argv[i + 1] : "";
+      if (k == "--mac" && i + 1 < argc)
+      {
+         BtDatabase::SetDefaultMac(v);
+         ++i;
+      }
+      else if (k.size() > 1 && k.front() != '-' || k == "-")
+      {
+         if (k != "-")
+            snoop_filename = k;
+      }
+      else
+      {
+         std::cout << "Usage: " << argv[0] << " [--mac <mac address>] capture.snoop\n";
+         return 1;
+      }
+   }
 
    std::ifstream infile;
-   if (argc > 1)
-      infile.open(argv[1], std::ios::binary);
+   if (!snoop_filename.empty())
+   {
+      infile.open(snoop_filename, std::ios::binary);
+      if (!infile)
+      {
+         std::cout << "Unable to open file\n";
+         return 1;
+      }
+   }
 
-   BtSnoopFile snoop(argc > 1 ? infile : std::cin);
+   BtSnoopFile snoop(snoop_filename.empty() ? std::cin : infile);
 
    struct DeviceInfo
    {
@@ -1388,10 +1442,11 @@ int main(int argc, char** argv)
       int64_t credits = 0;
    };
    std::map<std::pair<uint16_t, StreamCids>, StreamInfo> asha_streams;
+   uint64_t frame_idx = 0;
 
    BtParser parser;
    parser.NoteCallback = [](const std::string& s) {
-      std::cout << "System Note: " << s << '\n';
+      std::cout << "System Note: " << s.c_str() << '\n';
    };
    parser.ConnectionCallback = [](uint16_t connection, uint8_t status, const std::string& mac, uint16_t interval, uint16_t latency, uint16_t timeout) {
       std::cout << "New Connection: " << Hex(connection) << " " << mac << " params(" << interval << ", " << latency << ", " << timeout << ")\n";
@@ -1509,13 +1564,14 @@ int main(int argc, char** argv)
          std::cout << Hex(connection) << " PSM: " << Hex(info.psm) << " MTU: " << info.mtu << " MPS: " << info.mps << " Credits: " << info.tx_credits << '\n';
       }
    };
-   parser.Data = [&](uint16_t connection, bool rx, const L2CapCreditConnection& info, const uint8_t* data, size_t len)
+   parser.Data = [&](uint16_t connection, bool rx, const L2CapCreditConnection& info, const uint8_t* data, size_t len, size_t fragment_count)
    {
       // std::cout << "Data:        " << (rx ? ">> " : "<< ") << Hex(connection) << " " << info.tx_credits << " " << len << "bytes\n";
       auto itinfo = asha_streams.find(std::make_pair(connection, info.cids));
       if (itinfo != asha_streams.end())
       {
          itinfo->second.credits = info.tx_credits;
+         std::cout << std::setw(8) << frame_idx << (rx ? " >> " : " << ") << Hex(connection);
          if (itinfo->second.other)
          {
             assert(itinfo->second.dinfo && itinfo->second.other->dinfo);
@@ -1523,18 +1579,23 @@ int main(int argc, char** argv)
             {
                auto& left = itinfo->second.dinfo->side == DeviceInfo::LEFT ? itinfo->second : *itinfo->second.other;
                auto& right = itinfo->second.dinfo->side == DeviceInfo::LEFT ? *itinfo->second.other : itinfo->second;
-               std::cout << "Stereo:      " << (rx ? ">> " : "<< ") << Hex(connection) << " " << std::setw(4) << left.credits - right.credits << " " << len << " bytes\n";
+               const char* side = itinfo->second.dinfo->side == DeviceInfo::LEFT ? " left  " : " right ";
+               std::cout << side << std::setw(6) << left.credits
+                                 << std::setw(6) << right.credits
+                                 << '(' << std::setw(2) << left.credits - right.credits << ") "
+                                 << len << " bytes";
             }
          }
          else
          {
-            std::cout << "Mono:        " << (rx ? ">> " : "<< ") << Hex(connection) << " " << info.tx_credits << " " << len << "bytes\n";
+            std::cout << " mono " << info.tx_credits << " " << len << " bytes";
          }
+         if (fragment_count > 1)
+            std::cout << " " << fragment_count << " fragments";
+         std::cout << '\n';
       }
    };
 
-
-   uint64_t frame_idx = 0;
    while (true)
    {
       auto& packet = snoop.Next();

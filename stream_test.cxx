@@ -1,5 +1,6 @@
 #include "asha/Bluetooth.hh"
 #include "asha/Buffer.hh"
+#include "asha/Device.hh"
 #include "asha/Now.hh"
 #include "asha/Side.hh"
 #include "asha/Config.hh"
@@ -47,11 +48,11 @@ public:
    StreamTest(const std::string& left_path, const std::string& right_path):
       m_data_left{left_path.empty() ? std::vector<uint8_t>() : ReadFile(left_path)},
       m_data_right{right_path.empty() ? std::vector<uint8_t>() : ReadFile(right_path)},
-      m_buffer{asha::Buffer::Create([this](const RawS16& s) { return OnSendData(s); })},
       m_b(
-         [this](const asha::Bluetooth::BluezDevice& d) { OnAddDevice(d); },
+         [this](const asha::Bluetooth::BluezDevice& d) { OnAddSide(d); },
          [this](const std::string& p) { OnRemoveDevice(p); }
-      )
+      ),
+      m_device(new asha::Device("Stream Test"))
    {
       
    }
@@ -82,95 +83,80 @@ public:
    }
 
 protected:
-   void OnAddDevice(const asha::Bluetooth::BluezDevice& d)
+   void OnAddSide(const asha::Bluetooth::BluezDevice& d)
    {
-      std::shared_ptr<asha::Side> side = asha::Side::CreateIfValid(d);
-      if (side && side->ReadProperties())
+      // Called when we get a new device.
+      auto side = asha::Side::CreateIfValid(d);
+      if (side)
       {
-         auto& props = side->GetProperties();
+         g_info("Adding %s", d.path.c_str());
 
-         std::cout << side->Description().c_str() << '\n';
-         std::cout << "    Name:      " << side->Name().c_str() << '\n';
-         std::cout << "    Mac:       " << side->Mac().c_str() << '\n';
-         std::cout << "    HiSyncId:  " << props.hi_sync_id << '\n';
-         if (side->Name() != side->Alias())
-            std::cout << "    Alias:     " << side->Alias().c_str() << '\n';
-         std::cout << "    Side:      "
-            << ((props.capabilities & 0x01) ? "right" : "left") << " "
-            << ((props.capabilities & 0x02) ? "(binaural)" : "(monaural)") << '\n';
-         std::cout << "    Delay:     " << props.render_delay << " ms\n";
-         std::cout << "    Streaming: " << (props.feature_map & 0x01 ? "supported" : "not supported" ) << '\n';
-         std::string codecs;
-         if (props.codecs & 0x02)
-            codecs += " G.722@16kHz";
-         if (props.codecs & 0x04)
-            codecs += " G.722@24kHz";
-         std::cout << "    Codecs:   " << codecs.c_str() << '\n';
-         if (m_data_left.empty() && side->Left())
-         {
-            std::cout << "    Ignoring this device, since you didn't specify a left audio file\n";
-            return;
-         }
-         if (m_data_right.empty() && side->Right())
-         {
-            std::cout << "    Ignoring this device, since you didn't specify a right audio file\n";
-            return;
-         }
-         
-         bool connected = side->Connect();
-         std::cout << "    Connected: " << (connected ? "true": "false") << '\n';
+         std::weak_ptr<asha::Side> weak_side = side;
+         std::string path = d.path;
+         m_sides.emplace(path, side);
 
-         usleep(10000);
-         CheckPHY(side);
-         
-         bool was_running = m_running;
-         Stop();
-
-         for (auto& others: m_devices)
-            others.second->UpdateOtherConnected(true);
-
-         m_devices[d.path] = side;
-
-         if (was_running)
-            Start();
+         // TODO: Do we need to handle a timeout in case the device never becomes
+         //       ready? For now, I'm assuming that a timeout means a missing
+         //       device, and bluez will call OnRemoveDevice later.
+         side->SetOnConnectionReady([this, path, weak_side](){
+            auto side = weak_side.lock();
+            if (side)
+            {
+               SideReady(path, side);
+            }
+         });
       }
       else
       {
-         std::cout << d.name.c_str() << " is not an asha-enabled device\n";
+         g_info("%s is not an asha-enabled device", d.name.c_str());
       }
    }
 
+   void SideReady(const std::string& path, const std::shared_ptr<asha::Side>& side)
+   {
+      auto& props = side->GetProperties();
 
+      g_info("%s", side->Description().c_str());
+      g_info("    Name:      %s", side->Name().c_str());
+      g_info("    Mac:       %s", side->Mac().c_str());
+      g_info("    HiSyncId:  %lu", props.hi_sync_id);
+      if (side->Name() != side->Alias())
+         g_info("    Alias:     %s", side->Alias().c_str());
+      g_info("    Side:      %s %s",
+         ((props.capabilities & 0x01) ? "right" : "left"),
+         ((props.capabilities & 0x02) ? "(binaural)" : "(monaural)"));
+      g_info("    Delay:     %hu ms", props.render_delay);
+      g_info("    Streaming: %s", (props.feature_map & 0x01 ? "supported" : "not supported" ));
+      std::string codecs;
+      if (props.codecs & 0x02)
+         codecs += " G.722@16kHz";
+      if (props.codecs & 0x04)
+         codecs += " G.722@24kHz";
+      g_info("    Codecs:   %s", codecs.c_str());
+
+      // sockopts
+      // BT_SECURITY? returns BT_SECURITY_* constants, plus key size.
+      // BT_DEFER_SETUP? meant for listening sockets.
+      // BT_FLUSHABLE? gets the FLAG_FLUSHABLE flag
+      // BT_POWER? gets FLAG_FORCE_ACTIVE flag
+      CheckPHY(side);
+
+      m_device->AddSide(path, side);
+   }
    void OnRemoveDevice(const std::string& path)
    {
-      auto it = m_devices.find(path);
-      if (it != m_devices.end())
+      auto it = m_sides.find(path);
+      if (it != m_sides.end())
       {
-         std::cout << "Removing " << it->second->Description().c_str() << '\n';
-         Stop();
-         m_devices.erase(it);
-
-         for (auto& others: m_devices)
-            others.second->UpdateOtherConnected(false);
-
-         if (!m_devices.empty())
-            Start();
+         g_info("Removing %s", it->second->Description().c_str());
+         m_sides.erase(it);
+         m_device->RemoveSide(path);
       }
    }
-
 
    void FeederThreadDeadline()
    {
-      g722_encode_init(&m_state_left, 64000, G722_PACKED);
-      g722_encode_init(&m_state_right, 64000, G722_PACKED);
-
-      bool other = false;
-      for (auto& kv: m_devices)
-      {
-         kv.second->Start(other);
-         other = true;
-      }
-      m_buffer->Start();
+      auto buffer = asha::Buffer::Create([this](const RawS16& s) { return m_device->SendAudio(s); });
 
       size_t dropped = 0;
       size_t failed = 0;
@@ -185,11 +171,11 @@ protected:
          uint64_t t = Now();
          if (next < t)
          {
-            size_t new_dropped = m_buffer->RingDropped();
-            size_t new_failed = m_buffer->FailedWrites();
-            size_t new_silence = m_buffer->Silence();
-            std::cout << "Ring Occupancy: " << m_buffer->Occupancy()
-                << " High: " << m_buffer->OccupancyHigh()
+            size_t new_dropped = buffer->RingDropped();
+            size_t new_failed = buffer->FailedWrites();
+            size_t new_silence = buffer->Silence();
+            std::cout << "Ring Occupancy: " << buffer->Occupancy()
+                << " High: " << buffer->OccupancyHigh()
                 << " Ring Dropped: " << new_dropped - dropped
                 << " Total: " << new_dropped
                 << " Adapter Dropped: " << new_failed - failed
@@ -202,7 +188,7 @@ protected:
 
          while (t - pos > ASHA_PACKET_TIME)
          {
-            RawS16* samples = m_buffer->NextBuffer();
+            RawS16* samples = buffer->NextBuffer();
             if (!samples)
                break;
 
@@ -211,7 +197,7 @@ protected:
             if (!m_data_right.empty())
                memcpy(samples->r, m_data_right.data() + m_data_offset, MIN_SAMPLES_BYTES);
             
-            m_buffer->SendBuffer();
+            buffer->SendBuffer();
             
             m_data_offset += MIN_SAMPLES_BYTES;
             if (!m_data_left.empty() && m_data_offset + MIN_SAMPLES_BYTES > m_data_left.size())
@@ -221,88 +207,6 @@ protected:
             pos += ASHA_PACKET_TIME;
          }
       }
-      m_buffer->Stop();
-      for (auto& kv: m_devices)
-         kv.second->Stop();
-   }
-
-   bool OnSendData(const RawS16& s)
-   {
-      if (m_devices.empty()) return false;
-
-      bool ready = true;
-      for (auto& kv: m_devices)
-      {
-         if (!kv.second->Ready())
-            return false;
-      }
-
-      bool success = false;
-
-      // Do not send unless both streams will not block (because there are
-      // l2cap credits available).
-      // TODO: Also check for closed socket?
-      struct pollfd fds[m_devices.size()];
-      size_t i = 0;
-      for (auto& kv: m_devices)
-      {
-         fds[i] = pollfd{
-            .fd = kv.second->Sock(),
-            .events = POLLOUT
-         };
-         ++i;
-      }
-      if (m_devices.size() != poll(fds, m_devices.size(), 0))
-      {
-         return false;
-      }
-
-      AudioPacket packets[2];
-      AudioPacket* left;
-      AudioPacket* right;
-
-      g722_encode(&m_state_left, packets[0].data, s.l, s.SAMPLE_COUNT);
-      g722_encode(&m_state_right, packets[1].data, s.r, s.SAMPLE_COUNT);
-
-      left = &packets[0];
-      right = &packets[1];
-      if (m_data_left.empty())
-         left = right;
-      else if (m_data_right.empty())
-         right = left;
-
-      left->seq = right->seq = m_audio_seq;
-
-      for (auto& kv: m_devices)
-      {
-         auto status = kv.second->WriteAudioFrame(kv.second->Right() ? *right : *left);
-         switch(status)
-         {
-         case asha::Side::WRITE_OK:
-            success = true;
-            break;
-         case asha::Side::DISCONNECTED:
-            g_info("WriteAudioFrame returned DISCONNECTED");
-            // m_reconnect_cb(kv.first);
-            break;
-         case asha::Side::BUFFER_FULL:
-            g_info("WriteAudioFrame returned BUFFER_FULL");
-            break;
-         case asha::Side::NOT_READY:
-            g_info("WriteAudioFrame returned NOT_READY");
-            break;
-         case asha::Side::TRUNCATED:
-            g_info("WriteAudioFrame returned TRUNCATED");
-            break;
-         case asha::Side::OVERSIZED:
-            g_info("WriteAudioFrame returned OVERSIZED");
-            break;
-         }
-      }
-      if (success)
-         ++m_audio_seq;
-      
-      return success;
    }
 
    void CheckPHY(const std::shared_ptr<asha::Side>& device)
@@ -348,17 +252,13 @@ private:
    std::vector<uint8_t> m_data_right;
    size_t m_data_offset = 0;
 
-   std::map<std::string, std::shared_ptr<asha::Side>> m_devices;
+   
+   std::map<std::string, std::shared_ptr<asha::Side>> m_sides;
 
    volatile bool m_running = false;
    std::thread m_thread;
 
-   uint8_t m_audio_seq = 0;
-
-   g722_encode_state_t m_state_left{};
-   g722_encode_state_t m_state_right{};
-
-   std::shared_ptr<asha::Buffer> m_buffer;
+   std::shared_ptr<asha::Device> m_device;
    asha::Bluetooth m_b; // needs to be last
 };
 

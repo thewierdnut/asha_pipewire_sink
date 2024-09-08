@@ -12,6 +12,7 @@
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/l2cap.h>
 #include <glib-2.0/glib.h>
+#include <gio/gio.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -91,6 +92,8 @@ std::shared_ptr<Side> Side::CreateIfValid(const Bluetooth::BluezDevice& device)
       side->m_celen = Config::Celength();
       side->m_volume = Config::Volume();
 
+      side->ReadProperties();
+
       return side;
    }
    else
@@ -102,7 +105,10 @@ std::shared_ptr<Side> Side::CreateIfValid(const Bluetooth::BluezDevice& device)
 
 Side::~Side()
 {
-
+   if (m_sock_cancellable)
+      g_cancellable_cancel(m_sock_cancellable.get());
+   if (m_connect_failed_timeout != -1)
+      g_source_remove(m_connect_failed_timeout);
 }
 
 
@@ -119,28 +125,65 @@ std::string Side::Description() const
       return m_name;
 }
 
-Side::Status Side::ReadStatus()
+void Side::ReadPSM()
 {
-   auto result = m_char.status.Read();
-   return (Status)(result.empty() ? Status::CALL_FAILED : result[0]);
+   auto wp = weak_from_this();
+   m_char.le_psm_out.Read([wp](const std::vector<uint8_t>& data) {
+      g_debug("Read PSM Callback");
+
+      if (data.size() == sizeof(uint16_t))
+      {
+         auto self = wp.lock();
+         if (self)
+         {
+            self->m_psm_id = data[0] | (data[1] << 8);
+            self->Connect();
+         }
+         else
+            g_warning("Unable to lock side weak pointer in PSM callback");
+      }
+      else
+      {
+         g_warning("Unexpected psm data size: %zu", data.size());
+      }
+   });
 }
 
-bool Side::ReadProperties()
+void Side::ReadProperties()
 {
    // Query the device properties.
-   auto result = m_char.properties.Read();
-   if (result.size() < sizeof(m_asha_props))
-      return false;
-
-   memcpy(&m_asha_props, result.data(), sizeof(m_asha_props));
-   return true;
+   std::weak_ptr<Side> wp = shared_from_this();
+   m_char.properties.Read([wp](const std::vector<uint8_t>& data) {
+      if (data.size() == sizeof(m_asha_props))
+      {
+         g_debug("Properties read callback");
+         auto self = wp.lock();
+         if (self)
+         {
+            memcpy(&self->m_asha_props, data.data(), sizeof(m_asha_props));
+            self->m_asha_props_valid = true;
+            self->ReadPSM();
+            // Since we now call ReadPSM in serial rather than in parallel,
+            // this if statement will never be true. I'm not sure I want to do
+            // it this way though.
+            // if (self->m_connection_ready && self->m_OnConnectionReady)
+            // {
+            //    self->SetState(STOPPED);
+            //    self->m_OnConnectionReady();
+            // }
+         }
+         // TODO: once we have the properties, we can theoretically set
+         //       a spa_latency_build() POD to indicate what latency the
+         //       hearing devices expect.
+      }
+   });
 }
 
 
 void Side::SubscribeExtra(/* callbacks? */)
 {
    if (m_char.ha_status)
-      m_char.ha_status.Notify([this](const std::vector<uint8_t> &bytes) { OnHAStatus(bytes); });
+      m_char.ha_status.Notify([this](const std::vector<uint8_t> &bytes) { OnHAPropChanged(bytes); });
 
    if (m_char.battery_100)
       m_char.battery_100.Notify([this](const std::vector<uint8_t> &bytes) { if(!bytes.empty()) OnBattery(bytes[0]); });
@@ -155,10 +198,10 @@ void Side::SubscribeExtra(/* callbacks? */)
 
 bool Side::Disconnect()
 {
-   if (m_sock != -1)
+   if (m_sock)
    {
-      close(m_sock);
-      m_sock = -1;
+      g_socket_close(m_sock.get(), nullptr);
+      m_sock.reset();
       return true;
    }
    return false;
@@ -167,16 +210,7 @@ bool Side::Disconnect()
 
 bool Side::Connect()
 {
-   // Retrieve the PSM to connect to.
-   auto result = m_char.le_psm_out.Read();
-   if (result.size() < 2) return false;
-
-   // Should be two bytes.
-   if (result.empty())
-      return false;
-   m_psm_id = result[0];
-   if (result.size() > 1)
-      m_psm_id |= result[1] << 8;
+   assert(m_psm_id != 0);
    
    bool ret = Reconnect();
    EnableStatusNotifications();
@@ -185,17 +219,18 @@ bool Side::Connect()
 
 bool Side::Reconnect()
 {
-   assert(m_sock == -1);
-   m_sock = socket(AF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
+   g_debug("Creating Connection");
+
+   assert(!m_sock);
+   int sock = socket(AF_BLUETOOTH, SOCK_SEQPACKET|SOCK_NONBLOCK, BTPROTO_L2CAP);
    struct sockaddr_l2 addr{};
    addr.l2_family = AF_BLUETOOTH;
    addr.l2_bdaddr_type = BDADDR_LE_PUBLIC;
-   if (0 != bind(m_sock, (struct sockaddr*)&addr, sizeof(addr)))
+   if (0 != bind(sock, (struct sockaddr*)&addr, sizeof(addr)))
    {
       int e = errno;
       g_error("Failed to bind l2cap socket: %s", strerror(e));
-      close(m_sock);
-      m_sock = -1;
+      close(sock);
       return false;
    }
    
@@ -208,7 +243,7 @@ bool Side::Reconnect()
 
    // SOL_L2CAP options don't handle the new CoC mode. Use SOL_BLUETOOTH instead
    uint8_t mode = BT_MODE_LE_FLOWCTL;
-   if (0 != setsockopt(m_sock, SOL_BLUETOOTH, BT_MODE, &mode, sizeof(mode)))
+   if (0 != setsockopt(sock, SOL_BLUETOOTH, BT_MODE, &mode, sizeof(mode)))
    {
       int e = errno;
       g_error("Unable to set CoC flow control mode: %s", strerror(e));
@@ -217,38 +252,101 @@ bool Side::Reconnect()
       {
          g_error("Please make sure that the bluetooth kernel module is being loaded with enable_ecred=1.");
       }
-      close(m_sock);
-      m_sock = -1;
+      close(sock);
       return false;
    }
 
+   // TODO: Use setsockopt(sock, SOL_L2CAP, L2CAP_OPTIONS, ...) to set imtu/omtu
+   //       Or use setsockopt(sock, SOL_BLUETOOTH, BT_SNDMTU/BT_RCVMTU) ? BT_SNDMTU always returns EPERM?
+   //       and see if it overrides the crap 23 mtu that some devices use by
+   //       default.
 
-   int err = 0;
-   bool success = false;
-   for (size_t i = 0; i < 10; ++i)
+   // Switching from a native socket to a GSocket here, so that we can handle
+   // async operations from the main loop.
+   m_sock.reset(g_socket_new_from_fd(sock, nullptr), g_object_unref);
+   g_socket_set_blocking(m_sock.get(), false);
+   std::shared_ptr<GSocketAddress> gaddr(g_socket_address_new_from_native(&addr, sizeof(addr)), g_object_unref);
+
+   // If we get deleted while this operation is pending, we will want to cancel
+   // it.
+   m_sock_cancellable.reset(g_cancellable_new(), g_object_unref);
+   GError* err = nullptr;
+   if (g_socket_connect(m_sock.get(), gaddr.get(), m_sock_cancellable.get(), &err))
    {
-      if (connect(m_sock, (struct sockaddr*)&addr, sizeof(addr)) == 0)
+      // We shouldn't get here? I expect err to be set to G_IO_ERROR_PENDING.
+      // If we do get here, it means we performed a synchronous connect.
+      assert(!err);
+      if (err)
       {
-         success = true;
-         break;
+         g_warning("Got an error from g_socket_connect: %s", err->message);
+         g_object_unref(err);
       }
-      
-      err = errno;
-      if (err != EBUSY && err != EAGAIN || err != EWOULDBLOCK)
-         break;
-
-      g_usleep(1000);
+      ConnectSucceeded();
+      return true;
+   }
+   else if (!err)
+   {
+      // Not sure this is valid
+      g_error("No error, and no socket?");
    }
 
-   if (!success)
+   if (err->code != G_IO_ERROR_PENDING)
    {
-      g_warning("Failed to connect l2cap channel: %s", strerror(err));
-      close(m_sock);
-      m_sock = -1;
+      // Something bad happened.
+      g_warning("Unable to to connect to %s: %s", Description().c_str(), err->message);
+      g_object_unref(err);
       return false;
    }
+   g_error_free(err);
 
-   RawHci hci(m_mac, m_sock);
+   // Since this is a non-blocking socket, we don't know yet whether the
+   // connection will succeed or not. Instead, we need to place an event that
+   // gets called when the socket becomes writable, or we need to time out.
+   m_sock_source.reset(g_socket_create_source(m_sock.get(), G_IO_OUT, m_sock_cancellable.get()), g_source_unref);
+   struct CallbackContext
+   {
+      std::weak_ptr<Side> side;
+   };
+   auto* context = new CallbackContext{weak_from_this()};
+   GSocketSourceFunc src_callback = [](GSocket*, GIOCondition condition, gpointer data) {
+      g_debug("Connection Callback");
+      // Asynchronously called when the socket is connected, or gets an error.
+      auto* cc = (CallbackContext*)data;
+
+      auto self = cc->side.lock();
+      if (self && !g_cancellable_is_cancelled(self->m_sock_cancellable.get()))
+      {
+         GError* err = nullptr;
+         if (g_socket_check_connect_result(self->m_sock.get(), &err))
+            self->ConnectSucceeded();
+         else
+         {
+            if (err->code != G_IO_ERROR_PENDING)
+               self->ConnectFailed(err);
+            g_error_free(err);
+         }
+      }
+      return (gboolean)G_SOURCE_REMOVE;
+   };
+
+   g_source_set_callback(m_sock_source.get(),
+      G_SOURCE_FUNC(src_callback),
+      context,
+      [](gpointer data) { // Destructor for userdata.
+         delete (CallbackContext*)data;
+      }
+   );
+
+   g_source_attach(m_sock_source.get(), nullptr);
+
+   return true;
+}
+
+void Side::ConnectSucceeded()
+{
+   g_debug("Connection Succeeded");
+   // TODO: make these async
+   RawHci hci(m_mac, g_socket_get_fd(m_sock.get()));
    if (Config::Phy1m() || Config::Phy2m())
    {
       // This requires CAP_NET_RAW
@@ -278,8 +376,47 @@ bool Side::Reconnect()
       }
    }
    UpdateConnectionParameters(m_interval);
+   ConnectionReady();
+}
 
-   return true;
+
+void Side::ConnectionReady()
+{
+   g_debug("Connection Ready");
+
+   // Call the user callback if we have one.
+   m_connection_ready = true;
+   if (m_asha_props_valid && m_OnConnectionReady)
+   {
+      SetState(STOPPED);
+      m_OnConnectionReady();
+   }
+}
+
+
+void Side::SetOnConnectionReady(std::function<void()> ready)
+{
+   g_debug("Connection Ready Callback Set");
+   // If the connection is already ready, then call the callback immediately.
+   m_OnConnectionReady = ready;
+   if (m_connection_ready && m_asha_props_valid)
+   {
+      SetState(STOPPED);
+      m_OnConnectionReady();
+   }
+}
+
+
+void Side::ConnectFailed(const GError* err)
+{
+   g_warning("Connection to %s failed. Retrying in 1 second: %s", Description().c_str(), err->message);
+
+   m_connect_failed_timeout = g_timeout_add(1000, [](gpointer data) -> gboolean {
+      auto* self = (Side*)data;
+      self->Connect();
+      self->m_connect_failed_timeout = -1;
+      return G_SOURCE_REMOVE;
+   }, this);
 }
 
 
@@ -301,7 +438,8 @@ void Side::SetExternalVolume(uint8_t volume)
 bool Side::EnableStatusNotifications()
 {
    // Turn on status notifications.
-   return m_char.status.Notify([this](const std::vector<uint8_t>& data) { OnStatusNotify(data); });
+   m_char.status.Notify([this](const std::vector<uint8_t>& data) { OnStatusNotify(data); });
+   return true;
 }
 
 bool Side::DisableStatusNotifications()
@@ -311,37 +449,55 @@ bool Side::DisableStatusNotifications()
    return true;
 }
 
-bool Side::Start(bool otherstate)
+bool Side::Start(bool otherstate, std::function<void(bool)> OnDone)
 {
+   assert(m_state == STOPPED);
    const char* side = Left() ? "left " : "right";
    g_info("%s Sending ACP start other %s", side, otherstate ? "connected" : "not connected");
 
    static constexpr uint8_t G722_16KHZ = 1;
    m_ready_to_receive_audio = false;
-   m_next_status_fn = [this](Status s) {
-      m_ready_to_receive_audio = s == STATUS_OK;
+   auto wt = weak_from_this();
+   m_next_status_fn = [wt, OnDone](Status s) {
+      auto t = wt.lock();
+      if (t)
+      {
+         t->m_ready_to_receive_audio = s == STATUS_OK;
+         if (s == STATUS_OK)
+            t->SetState(READY);
+         OnDone(t->m_ready_to_receive_audio);
+      }
    };
-   return m_char.audio_control.Write({Control::START, G722_16KHZ, 0, (uint8_t)m_volume, (uint8_t)otherstate});
+   m_char.audio_control.Write({Control::START, G722_16KHZ, 0, (uint8_t)m_volume, (uint8_t)otherstate}, [](bool){});
+   return true;
 }
 
-bool Side::Stop()
+bool Side::Stop(std::function<void(bool)> OnDone)
 {
+   assert(m_state == READY);
    const char* side = Left() ? "left " : "right";
    g_info("%s Sending ACP stop", side);
 
    m_ready_to_receive_audio = false;
-   return m_char.audio_control.Write({Control::STOP});
+   auto wt = weak_from_this();
+   SetState(WAITING_FOR_STOP);
+   m_char.audio_control.Write({Control::STOP}, [OnDone, wt](bool status) {
+      auto t = wt.lock();
+      if (t)
+         t->SetState(STOPPED);
+      OnDone(status);
+   });
+   return true;
 }
 
 Side::WriteStatus Side::WriteAudioFrame(const AudioPacket& packet)
 {
    // Write 20ms of data. Should be exactly 160 bytes in size.
    static_assert(sizeof(packet) == 161, "We can only send 161 byte audio packets");
-   // assert(m_sock != -1);
    WriteStatus ret = NOT_READY;
-   if (m_sock != -1 && m_ready_to_receive_audio)
+   if (m_sock && m_ready_to_receive_audio)
    {
-      int bytes_sent = send(m_sock, &packet, sizeof(packet), MSG_DONTWAIT);
+      int bytes_sent = g_socket_send(m_sock.get(), (const char*)&packet, sizeof(packet), m_sock_cancellable.get(), nullptr);
       int err = errno;
       if (bytes_sent == sizeof(packet))
          ret = WRITE_OK;
@@ -363,35 +519,13 @@ Side::WriteStatus Side::WriteAudioFrame(const AudioPacket& packet)
       else
       {
          g_warning("Disconnected from %s: (%s)", Description().c_str(), strerror(err));
-         close(m_sock);
-         m_sock = -1;
+         g_socket_close(m_sock.get(), nullptr);
+         m_sock.reset();
          m_ready_to_receive_audio = false;
          ret = DISCONNECTED;
       }
    }
    return ret;
-}
-
-void Side::ReadFromAudioSocket()
-{
-   // ASHA standard says nothing about receiving traffic here, but android
-   // source says we get some statistics here.
-   // I haven't personally observed any traffic here.
-   if (m_sock != -1)
-   {
-      uint8_t buffer[512];
-      ssize_t count = recv(m_sock, buffer, sizeof(buffer), MSG_DONTWAIT);
-      if (count > 0)
-      {
-         const char* side = Left() ? "left " : "right";
-         for (int i = 0; i + 4 <= count; i += 4)
-         {
-            uint16_t events = *(uint16_t*)(buffer + i);
-            uint16_t frames = *(uint16_t*)(buffer + i + 2);
-            g_info("%s read %hu events %hu frames", side, events, frames);
-         }
-      }
-   }
 }
 
 bool Side::UpdateOtherConnected(bool connected)
@@ -408,6 +542,13 @@ bool Side::UpdateConnectionParameters(uint8_t interval)
    return m_char.audio_control.Command({Control::STATUS, Update::PARAMETERS_UPDATED, interval});
 }
 
+
+int Side::Sock() const
+{
+   return m_sock ? g_socket_get_fd(m_sock.get()) : -1;
+}
+
+
 void Side::OnStatusNotify(const std::vector<uint8_t>& data)
 {
    const char* side = Left() ? "left " : "right";
@@ -420,29 +561,29 @@ void Side::OnStatusNotify(const std::vector<uint8_t>& data)
    }
 }
 
-void Side::OnHAStatus(const std::vector<uint8_t>& data)
+void Side::OnHAPropChanged(const std::vector<uint8_t>& data)
 {
    // 38278651-76d7-4dee-83d8-894f3fa6bb99 notifications
    // I've partially figured out what some of this stuff means.
    const char* side = Left() ? "left " : "right";
    if (data.size() > 2)
    {
-      // Header is two bytes, but I'm not sure how its broken up.
+      // Property is two bytes, but I'm not sure how its broken up.
       // Reading this as big-endian for convenience.
-      uint16_t header = data[0] << 8 | data[1];
-      switch(header)
+      uint16_t property = data[0] << 8 | data[1];
+      switch(property)
       {
       case 0x0014: // Volume changed
          if (data.size() == 5)
          {
-            g_info("%s OnHaStatus(Muted: %hhu, Volume: %hhu, ??: %02hhx)", side, data[2], data[3], data[4]);
+            g_info("%s OnHAPropChanged(Muted: %hhu, Volume: %hhu, ??: %02hhx)", side, data[2], data[3], data[4]);
             return;
          }
          break;
       case 0x0194: // Not sure... it turns on and off with muting and streaming
          if (data.size() == 3)
          {
-            g_info("%s OnHAStatus(0194: %02hhx)", side, data[2]);
+            g_info("%s OnHAPropChanged(0194: %02hhx)", side, data[2]);
             return;
          }
          break;
@@ -460,16 +601,16 @@ void Side::OnHAStatus(const std::vector<uint8_t>& data)
             switch(data[2])
             {
             case 1:
-               g_info("%s OnHAStatus(Stream status 0034: (1) streaming)", side);
+               g_info("%s OnHAPropChanged(Stream status 0034: (1) streaming)", side);
                break;
             case 2:
-               g_info("%s OnHAStatus(Stream status 0034: (2) stopped)", side);
+               g_info("%s OnHAPropChanged(Stream status 0034: (2) stopped)", side);
                break;
             case 3:
-               g_info("%s OnHAStatus(Stream status 0034: (3) syncing)", side);
+               g_info("%s OnHAPropChanged(Stream status 0034: (3) syncing)", side);
                break;
             default:
-               g_info("%s OnHAStatus(Stream status 0034: %02hhx)", side, data[2]);
+               g_info("%s OnHAPropChanged(Stream status 0034: %02hhx)", side, data[2]);
                break;
             }
             return;
@@ -478,7 +619,7 @@ void Side::OnHAStatus(const std::vector<uint8_t>& data)
       case 0x0024:
          if (data.size() == 3)
          {
-            g_info("%s OnHAStatus(Profile Index: %hhu)", side, data[2]);
+            g_info("%s OnHAPropChanged(Profile Index: %hhu)", side, data[2]);
             return;
          }
          break;
@@ -487,11 +628,18 @@ void Side::OnHAStatus(const std::vector<uint8_t>& data)
          // always 00 54 69 ff 00 80 00
          break;
       }
+      std::stringstream ss;
+      HexDump(ss, data.data() + 2, data.size() - 2);
+      g_info("%s OnHAPropChanged(%04x, %s)", side, property, ss.str().c_str());
+   }
+   else
+   {
+      std::stringstream ss;
+      HexDump(ss, data.data(), data.size());
+      g_info("%s OnHAPropChanged(%s)", side, ss.str().c_str());
    }
 
-   std::stringstream ss;
-   HexDump(ss, data.data(), data.size());
-   g_info("%s OnHaStatus(%s)", side, ss.str().c_str());
+   
 }
 
 

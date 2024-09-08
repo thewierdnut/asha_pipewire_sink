@@ -31,6 +31,7 @@ public:
       std::map<uint16_t, std::vector<uint8_t>> raw;
    };
    bool ReadSysConfig(SystemConfig& config);
+   bool ReadLEFeatures(std::vector<uint8_t>& features);
 
    // Set Phy2M. Requires CAP_NET_RAW access.
    bool SendPhy(bool phy1m, bool phy2m) noexcept;

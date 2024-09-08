@@ -1,8 +1,11 @@
 #include "Asha.hh"
 #include "Bluetooth.hh"
+#include "Buffer.hh"
 #include "RawHci.hh"
 #include "Side.hh"
+#include "../pw/Stream.hh"
 
+#include <cassert>
 #include <glib.h>
 #include <set>
 
@@ -58,7 +61,7 @@ size_t Asha::Occupancy() const
 {
    size_t ret = 0;
    for (auto& kv: m_devices)
-      ret += kv.second->Occupancy();
+      ret += kv.second.buffer->Occupancy();
    return ret;
 }
 
@@ -68,8 +71,8 @@ size_t Asha::OccupancyHigh() const
    size_t ret = 0;
    for (auto& kv: m_devices)
    {
-      if (ret < kv.second->OccupancyHigh())
-         ret = kv.second->OccupancyHigh();
+      if (ret < kv.second.buffer->OccupancyHigh())
+         ret = kv.second.buffer->OccupancyHigh();
    }
    return ret;
 }
@@ -79,7 +82,7 @@ size_t Asha::RingDropped() const
 {
    size_t ret = 0;
    for (auto& kv: m_devices)
-      ret += kv.second->RingDropped();
+      ret += kv.second.buffer->RingDropped();
    return ret;
 }
 
@@ -88,7 +91,7 @@ size_t Asha::FailedWrites() const
 {
    size_t ret = 0;
    for (auto& kv: m_devices)
-      ret += kv.second->FailedWrites();
+      ret += kv.second.buffer->FailedWrites();
    return ret;
 }
 
@@ -101,7 +104,7 @@ size_t Asha::Silence() const
    // garbage to the screen.
    size_t ret = 0;
    for (auto& kv: m_devices)
-      ret += kv.second->Silence();
+      ret += kv.second.buffer->Silence();
    return ret;
 }
 
@@ -111,33 +114,24 @@ void Asha::OnAddDevice(const Bluetooth::BluezDevice& d)
 {
    // Called when we get a new device.
    auto side = Side::CreateIfValid(d);
-   if (side && side->ReadProperties())
+   if (side)
    {
-      auto& props = side->GetProperties();
+      std::weak_ptr<Side> weak_side = side;
+      std::string path = d.path;
+      m_sides.emplace_back(path, side);
 
-      g_info("Name:      %s", side->Name().c_str());
-      g_info("    HiSyncId %lu", props.hi_sync_id);
-      if (side->Name() != side->Alias())
-         g_info("    Alias:     %s", side->Alias().c_str());
-      g_info("    Side:      %s %s",
-         ((props.capabilities & 0x01) ? "right" : "left"),
-         ((props.capabilities & 0x02) ? "(binaural)" : "(monaural)"));
-      g_info("    Delay:     %hu ms", props.render_delay);
-      g_info("    Streaming: %s", (props.feature_map & 0x01 ? "supported" : "not supported" ));
-      g_info("    Codecs:    %s", (props.codecs & 0x02 ? "G.722" : "" ));
+      // TODO: Do we need to handle a timeout in case the device never becomes
+      //       ready? For now, I'm assuming that a timeout means a missing
+      //       device, and bluez will call OnRemoveDevice later.
+      side->SetOnConnectionReady([this, path, weak_side](){
+         g_debug("Connection Ready Callback Called");
 
-      // Insert, or find the existing one.
-      auto it = m_devices.find(props.hi_sync_id);
-      if (it == m_devices.end())
-      {
-         it = m_devices.emplace(props.hi_sync_id, std::make_shared<Device>(
-            props.hi_sync_id,
-            side->Name(),
-            side->Alias()
-         )).first;
-         g_info("Adding Sink %lu %s", it->first, it->second->Name().c_str());
-      }
-      it->second->AddSide(d.path, side);
+         auto side = weak_side.lock();
+         if (side)
+         {
+            SideReady(path, side);
+         }
+      });
    }
 }
 
@@ -147,21 +141,80 @@ void Asha::OnRemoveDevice(const std::string& path)
    // We don't know which device has the bluetooth device, but in all
    // likelyhood, there will only be one anyways, so just check them
    // all.
-   // This is deferred so that we don't have race conditions during creation,
-   // since the creation is also deferred.
    for (auto it = m_devices.begin(); it != m_devices.end(); ++it)
    {
-      if (it->second->RemoveSide(path))
+      if (it->second.device->RemoveSide(path))
       {
-         if (it->second->SideCount() == 0)
+         if (it->second.device->SideCount() == 0)
          {
             // Both left and right sides have disconnected, so erase the
             // device. This will also remove it from the set of available
             // pipewire sinks.
-            g_info("Removing Sink %lu %s", it->first, it->second->Name().c_str());
+            g_info("Removing Sink %lu %s", it->first, it->second.device->Name().c_str());
             m_devices.erase(it);
          }
          break;
       }
    }
+
+   for (auto it = m_sides.begin(); it != m_sides.end(); ++it)
+   {
+      if (it->first == path)
+      {
+         m_sides.erase(it);
+         break;
+      }
+   }
+}
+
+
+void Asha::SideReady(const std::string& path, const std::shared_ptr<Side>& side)
+{
+   assert(side->State() == Side::STOPPED);
+   g_debug("Side ready: %s", side->Description().c_str());
+   
+
+   auto& props = side->GetProperties();
+
+   g_info("Name:      %s", side->Name().c_str());
+   g_info("    HiSyncId %lu", props.hi_sync_id);
+   if (side->Name() != side->Alias())
+      g_info("    Alias:     %s", side->Alias().c_str());
+   g_info("    Side:      %s %s",
+      ((props.capabilities & 0x01) ? "right" : "left"),
+      ((props.capabilities & 0x02) ? "(binaural)" : "(monaural)"));
+   g_info("    Delay:     %hu ms", props.render_delay);
+   g_info("    Streaming: %s", (props.feature_map & 0x01 ? "supported" : "not supported" ));
+   g_info("    Codecs:    %s", (props.codecs & 0x02 ? "G.722" : "" ));
+   
+   // Insert, or find the existing one.
+   auto it = m_devices.find(props.hi_sync_id);
+   if (it == m_devices.end())
+   {
+      auto device = std::make_shared<Device>(side->Name());
+      auto buffer = Buffer::Create([device](const RawS16& samples) {
+          return device->SendAudio(samples);
+      });
+      auto stream = std::make_shared<pw::Stream>(
+         "asha_"+std::to_string(props.hi_sync_id), side->Name(),
+         []() { },
+         []() { },
+         []() { },
+         []() { },
+         [buffer](const RawS16& samples) {
+            // TODO: redesign this api so that we can retrieve the pointer and
+            //       have the pipewire stream fill it in.
+            auto p = buffer->NextBuffer();
+            if (p)
+            {
+               *p = samples;
+               buffer->SendBuffer();
+            }
+         }
+      );
+      it = m_devices.emplace(props.hi_sync_id, Pipeline{device, buffer, stream}).first;
+      g_info("Adding Sink %lu %s", it->first, side->Name().c_str());
+   }
+
+   it->second.device->AddSide(path, side);
 }
