@@ -260,10 +260,25 @@ void Device::OnStarted(const std::weak_ptr<Side>& side, bool status)
    
    assert(m_state == STREAM_INIT);
 
-   if (SidesAreAll(Side::READY))
+   if (status)
    {
-      Start();
-      m_state = STREAMING;
+      if (SidesAreAll(Side::READY))
+      {
+         Start();
+         m_state = STREAMING;
+      }
+   }
+   else
+   {
+      // Failed. Keep trying again until bluez invalidates the device.
+      bool otherstate = m_sides.size() > 1;
+      auto wt = weak_from_this();
+      auto ws = side;
+      s->Start(otherstate, [wt, ws](bool success){
+         auto self = wt.lock();
+         if (self)
+            self->OnStarted(ws, success);
+      });
    }
 }
 

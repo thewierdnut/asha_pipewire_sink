@@ -463,11 +463,14 @@ bool Side::Start(bool otherstate, std::function<void(bool)> OnDone)
       if (t)
       {
          t->m_ready_to_receive_audio = s == STATUS_OK;
-         if (s == STATUS_OK)
+         if (t->m_ready_to_receive_audio)
             t->SetState(READY);
+         else
+            t->SetState(STOPPED);
          OnDone(t->m_ready_to_receive_audio);
       }
    };
+   SetState(WAITING_FOR_READY);
    m_char.audio_control.Write({Control::START, G722_16KHZ, 0, (uint8_t)m_volume, (uint8_t)otherstate}, [](bool){});
    return true;
 }

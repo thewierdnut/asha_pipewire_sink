@@ -27,8 +27,8 @@ int main(int argc, char** argv)
 
    g_info("Starting...");
    std::shared_ptr<GMainLoop> loop(g_main_loop_new(nullptr, true), g_main_loop_unref);
-   auto quitter1 = g_unix_signal_add(SIGINT, Shutdown, loop.get());
-   auto quitter2 = g_unix_signal_add(SIGTERM, Shutdown, loop.get());
+   guint quitter1 = g_unix_signal_add(SIGINT, Shutdown, loop.get());
+   guint quitter2 = g_unix_signal_add(SIGTERM, Shutdown, loop.get());
    asha::Asha a;
 
    // Auto-reconnection logic can be "annoyingly persistent". Make it optional.

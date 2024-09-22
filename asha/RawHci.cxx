@@ -113,7 +113,7 @@ RawHci::RawHci(const std::string& mac, int connection_sock) noexcept
    hci_filter_set_event(EVT_LE_META_EVENT, &filter);
    if (setsockopt(sock, SOL_HCI, HCI_FILTER, &filter, sizeof(filter)) < 0)
    {
-      // This probably won't break our query if the filter is broken.
+      // TODO: report error or something
    }
    
    m_sock = sock;
