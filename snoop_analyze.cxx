@@ -394,6 +394,7 @@ struct GattCharacteristic
    uint16_t description;
    uint8_t properties;
    std::string uuid;
+   bool guess = false;
 };
 struct GattService
 {
@@ -708,7 +709,6 @@ public:
    {
       auto& conn = m_connections[connection];
 
-    
       if (conn.services.empty())
       {
          for (auto& s: m_db.Services(""))
@@ -740,10 +740,10 @@ public:
       {
          if (pservice && (pservice->handle > c.first || pservice->end_handle < c.first))
             continue;
-         if (c.first == handle) return HandleInfo{HandleInfo::CHAR, handle, pservice, &c.second};
+         if (c.second.value == handle) return HandleInfo{HandleInfo::CHAR_VALUE, handle, pservice, &c.second};
          if (c.second.ccc == handle) return HandleInfo{HandleInfo::CHAR_CCC, handle, pservice, &c.second};
          if (c.second.description == handle) return HandleInfo{HandleInfo::CHAR_DESCRIPTION, handle, pservice, &c.second};
-         if (c.second.value == handle) return HandleInfo{HandleInfo::CHAR_VALUE, handle, pservice, &c.second};
+         if (c.first == handle) return HandleInfo{HandleInfo::CHAR, handle, pservice, &c.second};
          // TODO: handle other descriptor types.
       }
 
@@ -782,6 +782,16 @@ public:
       case HandleInfo::CHAR_DESCRIPTOR:   return UuidStr(info.characteristic->uuid) + " descriptor";
       default: return "unknown";
       }
+   }
+
+   void AddCharacteristicGuess(uint16_t connection, uint16_t value_handle, const std::string& uuid)
+   {
+      // We don't know the characteristic handle so just use the value_handle
+      // instead.
+      auto& characteristic = m_connections[connection].characteristic[value_handle];
+      characteristic.value = value_handle;
+      characteristic.uuid = uuid;
+      characteristic.guess = true;
    }
 
 protected:
@@ -1246,6 +1256,9 @@ protected:
          assert(conn.tx_credits > 0);
          --conn.tx_credits;
       }
+      uint16_t sdu_length = b.U16();
+      if (sdu_length != b.Size())
+         b.Error("Invalid SDU length");
       auto& base_conn = m_connections[handle];
       if (Data)
          Data(handle, rx, conn, b.Data(), b.Size(), base_conn.pending[rx].fragment_count);
@@ -1440,9 +1453,13 @@ int main(int argc, char** argv)
       StreamInfo* other = nullptr;
 
       int64_t credits = 0;
+      uint8_t seq = 0;
+
+      uint64_t expected_stamp = 0;
    };
    std::map<std::pair<uint16_t, StreamCids>, StreamInfo> asha_streams;
    uint64_t frame_idx = 0;
+   uint64_t stamp = 0;
 
    BtParser parser;
    parser.NoteCallback = [](const std::string& s) {
@@ -1481,9 +1498,44 @@ int main(int argc, char** argv)
    parser.Write = [&](uint16_t connection, uint16_t handle, const std::vector<uint8_t>& bytes) {
       std::cout << "Write:          " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << ToString(bytes) << '\n';
    };
+   std::map<uint16_t, bool> next_read_is_psm;
    parser.Read = [&](uint16_t connection, uint16_t handle, const std::vector<uint8_t>& bytes) {
       std::cout << "Read:           " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << ToString(bytes) << '\n';
       auto info = parser.FindHandle(connection, handle);
+      if (!info.characteristic)
+      {
+         // We don't know what this is, probably because the snoop file is
+         // missing the discovery packets. Use some heuristics to guess.
+         if (bytes.size() == 2 && next_read_is_psm[connection])
+         {
+            std::cout << "   Guessing that this is ASHA_LE_PSM_OUT\n";
+            parser.AddCharacteristicGuess(connection, handle, ASHA_LE_PSM_OUT);
+         }
+         next_read_is_psm[connection] = false; // stop looking for it.
+         if (bytes.size() == 17 && bytes[0] == 0x01 && bytes[10] == 0x01 && bytes[15] == 0x02)
+         {
+            //    uint8_t version;        // must be 0x01
+            //    uint8_t capabilities;   // Mask. 0x01 is right side, 0x02 is binaural, 0x04 is CSIS support
+            //    uint64_t hi_sync_id;    // Same for paired devices
+            //    uint8_t feature_map;    // 0x1 is audio streaming supported.
+            //    uint16_t render_delay;  // ms delay before audio is rendered. For synchronization purposes.
+            //    uint16_t reserved;      // preparation delay
+            //    uint16_t codecs;        // 0x2 is g.722. No others are defined.
+            std::cout << "   Guessing that this is ASHA_READ_ONLY_PROPERTIES\n";
+            parser.AddCharacteristicGuess(connection, handle, ASHA_READ_ONLY_PROPERTIES);
+            // The next 2 byte value we read should be the psm
+            next_read_is_psm[connection] = true;
+         }
+
+         // Retry the search with the guesses in.
+         info = parser.FindHandle(connection, handle);
+      }
+      else
+      {
+         // If we know what the characterisic is, then don't guess a psm.
+         next_read_is_psm[connection] = false;
+      }
+
       if (info.characteristic)
       {
          if (info.characteristic->uuid == ASHA_LE_PSM_OUT && bytes.size() == 2)
@@ -1592,6 +1644,22 @@ int main(int argc, char** argv)
          }
          if (fragment_count > 1)
             std::cout << " " << fragment_count << " fragments";
+         if (len > 1)
+         {
+            uint8_t seq = data[0];
+            std::cout << " " << std::setw(3) << (unsigned)data[0] << " seq";
+            if (seq != itinfo->second.seq + 1 && seq != 0)
+               std::cout << " (Missing " << (unsigned)(seq - itinfo->second.seq + 1) << " frames)";
+            itinfo->second.seq = seq;
+         }
+         if (itinfo->second.expected_stamp == 0)
+            itinfo->second.expected_stamp = stamp;
+         double dt = (int64_t)(stamp - itinfo->second.expected_stamp) / 1000.0;
+         auto oldflags = std::cout.flags();
+         std::cout << ' ' << std::fixed << std::setprecision(3) << std::showpos << std::setw(9) << dt << " ms";
+         std::cout.flags(oldflags);
+         itinfo->second.expected_stamp += 20000;
+
          std::cout << '\n';
       }
    };
@@ -1602,6 +1670,7 @@ int main(int argc, char** argv)
       if (!packet)
          break;
       ++frame_idx;
+      stamp = packet.stamp;
       BtBufferStream b("Transport", packet.data, packet.length);
       try
       {

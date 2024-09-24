@@ -35,7 +35,7 @@ public:
       uint64_t hi_sync_id;    // Same for paired devices
       uint8_t feature_map;    // 0x1 is audio streaming supported.
       uint16_t render_delay;  // ms delay before audio is rendered. For synchronization purposes.
-      uint16_t reserved;
+      uint16_t reserved;      // Undocumented preparation_delay
       uint16_t codecs;        // 0x2 is g.722. No others are defined.
    } __attribute__((packed));
 
