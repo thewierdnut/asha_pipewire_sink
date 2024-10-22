@@ -1251,9 +1251,10 @@ protected:
    {
       if (!rx)
       {
-         // TODO: If this is zero, we shouldn't have sent this. Its more likely
-         //       we didn't parse this correctly though.
-         assert(conn.tx_credits > 0);
+         // If we parsed the header, then tx_credits should never be zero. If
+         // we inferred the stream, then we don't know how many credits there
+         // are, so in theory this could go negative.
+         // assert(conn.tx_credits > 0);
          --conn.tx_credits;
       }
       uint16_t sdu_length = b.U16();
@@ -1273,12 +1274,24 @@ protected:
          if ((rx ? kv.first.rx : kv.first.tx) == cid)
          {
             ParseLECreditConnectionData(rx, handle, kv.second, b.Sub("LE Credit Based Connection Payload"));
-            break;
+            return;
          }
       }
 
-      // Heuristic... If this is exactly 161 bytes long, its probably asha data
-      // in a credit-based CoC
+      // We must have missed the initialization of this stream. Try to guess.
+      uint16_t sdu_length = b.U16();
+      if (sdu_length == 161 && b.Size() == 161 && rx == false)
+      {
+         // This is the right size for a g.722 audio frame.
+         auto& stream = conn.ecred[StreamCids{.tx = cid}] = {
+            .outgoing = true,
+            .cids = {
+               .tx = cid
+            },
+         };
+         if (Data)
+            Data(handle, rx, stream, b.Data(), b.Size(), conn.pending[rx].fragment_count);
+      }
    }
    
    void AclPkt(bool rx, BtBufferStream pkt)
@@ -1402,6 +1415,7 @@ private:
 int main(int argc, char** argv)
 {
    std::string snoop_filename;
+   bool extract_audio = false;
    for (int i = 1; i < argc; ++i)
    {
       std::string k = argv[i];
@@ -1416,13 +1430,48 @@ int main(int argc, char** argv)
          if (k != "-")
             snoop_filename = k;
       }
+      else if (k == "--extract")
+      {
+         extract_audio = true;
+      }
       else
       {
-         std::cout << "Usage: " << argv[0] << " [--mac <mac address>] capture.snoop\n";
+         std::cout << "Usage: " << argv[0] << " [opts] capture.snoop\n"
+                   << "This tool will analyze a bluetooth capture to check for asha protocol usage, and\n"
+                   << "will attempt to find common problems.\n"
+                   << "Options:\n"
+                   << "   --mac <mac_address>  Mac address to assume for remote device. This is used to\n"
+                   << "                        look up characteristics that may have been discovered\n"
+                   << "                        during a previous connection or dump file if the pairing\n"
+                   << "                        is not part of the snoop file.\n"
+                   << "   --extract            Extract audio into <cid>_<connid>.g722 files\n"
+                   << "\n"
+                   << "Parsed characteristics are cached in ~/.local/share/snoop_analyze/cache/ to be\n"
+                   << "used in the future. These characteristics can also be manually copied by the\n"
+                   << "user from the bluez cache at /var/lib/bluetooth/<hci-mac>/cache/\n"
+                   << "\n"
+                   << "Stream analysis output will look like this:\n"
+                   << "     183 << 0e02 right      0     7(-7) 161 bytes   0 seq    +0.000 ms\n"
+                   << "     184 << 0e01 left       7     7( 0) 161 bytes   0 seq    +0.000 ms\n"
+                   << "     187 << 0e02 right      7     6( 1) 161 bytes   1 seq    +0.326 ms\n"
+                   << "     188 << 0e01 left       6     6( 0) 161 bytes   1 seq    +0.304 ms\n"
+                   << "   The columns are:\n"
+                   << "      1. Packet number\n"
+                   << "      2. << for transmit, >> for receive\n"
+                   << "      3. Device id\n"
+                   << "      4. Human readable device label (\"left\" or \"right\")\n"
+                   << "      5. Current left credits\n"
+                   << "      6. Current right credits\n"
+                   << "      7. Delta between left or right (this should stay less than 4)\n"
+                   << "      8. Size of data frame plus sequence header (should be 161 bytes)\n"
+                   << "      9. One byte sequence number\n"
+                   << "     10. Delta between the audio offset from the beginning of the stream\n"
+            ;
+
          return 1;
       }
    }
-
+   
    std::ifstream infile;
    if (!snoop_filename.empty())
    {
@@ -1456,6 +1505,8 @@ int main(int argc, char** argv)
       uint8_t seq = 0;
 
       uint64_t expected_stamp = 0;
+
+      std::unique_ptr<std::ofstream> outfile;
    };
    std::map<std::pair<uint16_t, StreamCids>, StreamInfo> asha_streams;
    uint64_t frame_idx = 0;
@@ -1620,14 +1671,53 @@ int main(int argc, char** argv)
    {
       // std::cout << "Data:        " << (rx ? ">> " : "<< ") << Hex(connection) << " " << info.tx_credits << " " << len << "bytes\n";
       auto itinfo = asha_streams.find(std::make_pair(connection, info.cids));
+      if (itinfo == asha_streams.end())
+      {
+         if (len == 161 && rx == false)
+         {
+            // Its the right size, its probably an audio packet.
+            std::cout << "   Guessing that connection " << connection << " stream " << info.cids.tx << " is g.722 audio\n";
+            auto results = asha_streams.emplace(std::make_pair(connection, info.cids), StreamInfo{
+               .cids = info.cids
+            });
+            itinfo = results.first;
+
+            // Is there another stream from a different device that we guessed
+            // at? Its probably meant to be paired with this one.
+            for (auto& stream: asha_streams)
+            {
+               if (stream.first.first != connection && stream.first.second.rx == 0 && stream.second.other == nullptr)
+               {
+                  itinfo->second.other = &stream.second;
+                  stream.second.other = &itinfo->second;
+
+                  std::cout << "   Guessing that " << Hex(itinfo->first.first) << ':' << Hex(itinfo->first.second.tx)
+                            << " and " << Hex(stream.first.first) << ':' << Hex(stream.first.second.tx)
+                            << " are a stereo pair.\n";
+                  break;
+               }
+            }
+         }
+      }
+
       if (itinfo != asha_streams.end())
       {
+         if (len > 1 && extract_audio)
+         {
+            if (!itinfo->second.outfile)
+            {
+               std::string filename = Hex(connection) + "_" + Hex(info.cids.tx) + ".g722";
+               itinfo->second.outfile = std::make_unique<std::ofstream>(filename, std::ios::binary);
+            }
+            // First byte is sequence number. Skip it.
+            itinfo->second.outfile->write((const char*)data + 1, len - 1);
+         }
+
          itinfo->second.credits = info.tx_credits;
          std::cout << std::setw(8) << frame_idx << (rx ? " >> " : " << ") << Hex(connection);
          if (itinfo->second.other)
          {
-            assert(itinfo->second.dinfo && itinfo->second.other->dinfo);
-            if (itinfo->second.dinfo)
+            if (itinfo->second.dinfo && itinfo->second.other->dinfo)
             {
                auto& left = itinfo->second.dinfo->side == DeviceInfo::LEFT ? itinfo->second : *itinfo->second.other;
                auto& right = itinfo->second.dinfo->side == DeviceInfo::LEFT ? *itinfo->second.other : itinfo->second;
@@ -1635,6 +1725,24 @@ int main(int argc, char** argv)
                std::cout << side << std::setw(6) << left.credits
                                  << std::setw(6) << right.credits
                                  << '(' << std::setw(2) << left.credits - right.credits << ") "
+                                 << len << " bytes";
+            }
+            else
+            {
+               // We don't know which is left and which is right (we guessed
+               // that this is an audio stream)
+               const StreamInfo* dev1 = itinfo->second.other;
+               const StreamInfo* dev2 = &itinfo->second;
+               const char* label = " dev2 ";
+               if (&itinfo->second < itinfo->second.other)
+               {
+                  dev1 = &itinfo->second;
+                  dev2 = itinfo->second.other;
+                  label = " dev1 ";
+               }
+               std::cout << label << std::setw(6) << dev1->credits
+                                 << std::setw(6) << dev2->credits
+                                 << '(' << std::setw(2) << dev1->credits - dev2->credits << ") "
                                  << len << " bytes";
             }
          }
