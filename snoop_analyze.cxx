@@ -690,11 +690,12 @@ public:
    std::function<void(uint16_t connection_handle, uint16_t char_handle, uint16_t desc_handle, const std::string& uuid)> Descriptor;
    std::function<void(uint16_t connection_handle, uint16_t handle, const std::vector<uint8_t>& bytes)> Write;
    std::function<void(uint16_t connection_handle, uint16_t handle, const std::vector<uint8_t>& bytes)> Read;
+   std::function<void(uint16_t connection_handle, uint16_t handle, const std::vector<uint8_t>& bytes)> Notify;
    std::function<void(uint16_t connection_handle, uint16_t handle, uint8_t code)> FailedWrite;
    std::function<void(uint16_t connection_handle, uint16_t handle, uint8_t code)> FailedRead;
    std::function<void(uint16_t connection_handle, uint16_t status, const L2CapCreditConnection& info)> NewCreditConnection;
    std::function<void(uint16_t connection_handle, bool rx, const L2CapCreditConnection& info, const uint8_t* data, size_t len, size_t fragment_count)> Data;
-
+   std::function<void(uint16_t connection_handle, uint8_t status, const std::string& mac, uint8_t reason)> Disconnect;
 
 
    struct HandleInfo
@@ -850,6 +851,24 @@ protected:
       }
    }
 
+   void DisconnectEvent(BtBufferStream pkt)
+   {
+      uint8_t length = pkt.U8();
+      if (length > pkt.Size())
+         pkt.Error("bad length");
+      if (length != 4)
+         pkt.Error("Unexpected length");
+      uint8_t status = pkt.U8();
+      uint16_t handle = pkt.U16();
+      uint8_t reason = pkt.U8();
+      auto& info = m_connections[handle];
+
+      if (Disconnect)
+         Disconnect(handle, status, info.mac, reason);
+
+      m_connections.erase(handle);
+   }
+
    void LeMetaEvent(BtBufferStream pkt)
    {
       uint8_t length = pkt.U8();
@@ -867,6 +886,7 @@ protected:
          auto& conn = m_connections[handle] = ConnectionInfo{};
          conn.handle = handle;
          conn.type = ConnectionInfo::L2CAP;
+         b.U8(); // peer address type
          conn.mac = b.Mac();
          conn.interval = b.U16();
          conn.latency  = b.U16();
@@ -894,6 +914,9 @@ protected:
          uint16_t handle = b.U16();
          auto& conn = m_connections[handle] = ConnectionInfo{};
          conn.handle = handle;
+         // TODO: if the address type is random, how do we recognize it if they
+         //       disconnect and reconnect? Should we at least print a warning
+         //       here?
          b.Skip(2); // role/peer address type
          conn.type = ConnectionInfo::L2CAP;
          conn.mac = b.Mac();
@@ -967,6 +990,7 @@ protected:
    {
       switch (pkt.U8())
       {
+      case 0x05:  DisconnectEvent(pkt.Sub("Disconnect Complete")); break;
       case 0x3e:  LeMetaEvent(pkt.Sub("LE Meta Event")); break;
       }
    }
@@ -1111,6 +1135,14 @@ protected:
       }
    }
 
+   void ValueNotification(bool rx, uint16_t connection, BtBufferStream b)
+   {
+      auto& conn = m_connections[connection];
+      uint16_t value_handle = b.U16();
+      if (Notify)
+         Notify(connection, value_handle, std::vector<uint8_t>(b.Data(), b.Data() + b.Size()));
+   }
+
 
    void ParseAttribute(bool rx, uint16_t handle, BtBufferStream b)
    {
@@ -1156,6 +1188,9 @@ protected:
          break;
       case 0x0b: // Read Response
          ReadResponse(rx, handle, b.Sub("Read Response"));
+         break;
+      case 0x1b: // Handle Value Notification
+         ValueNotification(rx, handle, b.Sub("Value Notification"));
          break;
       }
    }
@@ -1519,6 +1554,18 @@ int main(int argc, char** argv)
    parser.ConnectionCallback = [](uint16_t connection, uint8_t status, const std::string& mac, uint16_t interval, uint16_t latency, uint16_t timeout) {
       std::cout << "New Connection: " << Hex(connection) << " " << mac << " params(" << interval << ", " << latency << ", " << timeout << ")\n";
    };
+   parser.Disconnect = [&](uint16_t connection, uint8_t status, const std::string& mac, uint8_t reason)
+   {
+      std::cout << "Disconnect:     " << Hex(connection) << " " << mac << " " << Hex(reason) << '\n';
+      for (auto it = asha_streams.begin(); it != asha_streams.end();)
+      {
+         if (it->first.first == connection)
+            it = asha_streams.erase(it);
+         else
+            ++it;
+      }
+      device_info.erase(connection);
+   };
    parser.DleChange = [](uint16_t connection, uint16_t tx_dlen, uint16_t tx_time, uint16_t rx_dlen, uint16_t rx_time) {
       std::cout << "Dle Change:     " << Hex(connection) << " tx: " << tx_dlen << " " << tx_time << "μs   rx: " << rx_dlen << " " << rx_time << "μs\n";
    };
@@ -1623,6 +1670,23 @@ int main(int argc, char** argv)
             }
          }
       }
+   };
+   parser.Notify = [&](uint16_t connection, uint16_t handle, const std::vector<uint8_t>& bytes) {
+      std::cout << "Notify:         " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << Hex(bytes);
+      auto info = parser.FindHandle(connection, handle);
+      if (info.characteristic)
+      {
+         if (info.characteristic->uuid == ASHA_AUDIO_STATUS && bytes.size() == 1)
+         {
+            switch((int8_t)bytes[0])
+            {
+            case 0: std::cout << " [Success]"; break;
+            case -1: std::cout << " [Unknown Command]"; break;
+            case -2: std::cout << " [Illegal Parameters]"; break;
+            }
+         }
+      }
+      std::cout << '\n';
    };
    parser.FailedWrite = [&](uint16_t connection, uint16_t handle, uint8_t code) {
       std::cout << "Failed Write:   " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << code << '\n';
