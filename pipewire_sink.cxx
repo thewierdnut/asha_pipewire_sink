@@ -42,24 +42,26 @@ int main(int argc, char** argv)
 
    guint stat_timer = g_timeout_add(1000, [](void* userdata)->gboolean {
       auto& a = *(asha::Asha*)userdata;
+      if (a.HasDevice())
+      {
+         size_t new_dropped = a.RingDropped();
+         size_t new_failed = a.FailedWrites();
+         size_t new_silence = a.Silence();
 
-      size_t new_dropped = a.RingDropped();
-      size_t new_failed = a.FailedWrites();
-      size_t new_silence = a.Silence();
+         std::cout << "Ring Occupancy: " << a.Occupancy()
+                  << " High: " << a.OccupancyHigh()
+                  << " Ring Dropped: " << new_dropped - dropped
+                  << " Total: " << new_dropped
+                  << " Adapter Dropped: " << new_failed - failed
+                  << " Total: " << new_failed
+                  << " Silence: " << new_silence - silence
+                  << " Total: " << new_silence
+                  << '\n';
 
-      std::cout << "Ring Occupancy: " << a.Occupancy()
-                << " High: " << a.OccupancyHigh()
-                << " Ring Dropped: " << new_dropped - dropped
-                << " Total: " << new_dropped
-                << " Adapter Dropped: " << new_failed - failed
-                << " Total: " << new_failed
-                << " Silence: " << new_silence - silence
-                << " Total: " << new_silence
-                << '\n';
-
-      dropped = new_dropped;
-      failed = new_failed;
-      silence = new_silence;
+         dropped = new_dropped;
+         failed = new_failed;
+         silence = new_silence;
+      }
       return G_SOURCE_CONTINUE;
    }, &a);
 

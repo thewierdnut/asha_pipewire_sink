@@ -30,6 +30,8 @@ public:
    size_t FailedWrites() const;
    size_t Silence() const;
 
+   bool HasDevice() const { return !m_devices.empty(); }
+
 protected:
    void OnAddDevice(const Bluetooth::BluezDevice& d);
    void OnRemoveDevice(const std::string& path);
