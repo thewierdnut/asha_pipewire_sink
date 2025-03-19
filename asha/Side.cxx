@@ -90,7 +90,7 @@ std::shared_ptr<Side> Side::CreateIfValid(const Bluetooth::BluezDevice& device)
       side->m_interval = Config::Interval();
       side->m_timeout = Config::Timeout();
       side->m_celen = Config::Celength();
-      side->m_volume = Config::Volume();
+      side->m_volume = 0;
 
       side->ReadProperties();
 
@@ -186,12 +186,21 @@ void Side::SubscribeExtra(/* callbacks? */)
       m_char.ha_status.Notify([this](const std::vector<uint8_t> &bytes) { OnHAPropChanged(bytes); });
 
    if (m_char.battery_100)
+   {
       m_char.battery_100.Notify([this](const std::vector<uint8_t> &bytes) { if(!bytes.empty()) OnBattery(bytes[0]); });
+      m_char.battery_100.Read([this](const std::vector<uint8_t> &bytes) { if(!bytes.empty()) OnBattery(bytes[0]); });
+   }
    else if (m_char.battery_10)
-      m_char.battery_100.Notify([this](const std::vector<uint8_t> &bytes) { if(!bytes.empty()) OnBattery(bytes[0] * 10); });
+   {
+      m_char.battery_10.Notify([this](const std::vector<uint8_t> &bytes) { if(!bytes.empty()) OnBattery(bytes[0] * 10); });
+      m_char.battery_10.Read([this](const std::vector<uint8_t> &bytes) { if(!bytes.empty()) OnBattery(bytes[0] * 10); });
+   }
 
    if (m_char.external_volume)
-      m_char.external_volume.Notify([this](const std::vector<uint8_t> &bytes) { if (!bytes.empty()) OnExternalVolume(bytes[0]); } );
+   {
+      m_char.external_volume.Notify([this](const std::vector<uint8_t> &bytes) { if (!bytes.empty()) OnMicrophoneVolume(bytes[0]); } );
+      m_char.external_volume.Read([this](const std::vector<uint8_t> &bytes) { if (!bytes.empty()) OnMicrophoneVolume(bytes[0]); } );
+   }
 }
 
 
@@ -422,16 +431,35 @@ void Side::ConnectFailed(const GError* err)
 
 void Side::SetStreamVolume(int8_t volume)
 {
+   // range is -128 to 0
+   if (volume > 0)
+      volume = 0;
    m_volume = volume;
-
+   g_info("Setting %s stream volume to %hhd", Left() ? "left" : "right", volume);
+   Config::SetConfigItem(Left() ? "left_volume" : "right_volume", volume);
    m_char.volume.Command({(uint8_t)m_volume});
+   Updated();
 }
 
 
-void Side::SetExternalVolume(uint8_t volume)
+void Side::SetMicrophoneVolume(uint8_t volume)
 {
    if (m_char.external_volume)
-      m_char.external_volume.Command({volume});
+   {
+      g_info("Setting %s microphone volume to %hhu", Left() ? "left" : "right", volume);
+      auto p = weak_from_this();
+      m_char.external_volume.Write({volume}, [p, volume](bool b) {
+         auto self = p.lock();
+         if (self)
+            self->m_microphone_volume = volume;
+         Config::SetConfigItem(self->Left() ? "left_microphone" : "right_microphone", volume);
+         g_info("Volume %s successfully", b ? "set" : "not set");
+      });
+   }
+   else
+   {
+      g_info("Don't know how to set this device's %s microphone volume to %hhu", Left() ? "left" : "right", volume);
+   }
 }
 
 
@@ -471,6 +499,10 @@ bool Side::Start(bool otherstate, std::function<void(bool)> OnDone)
       }
    };
    SetState(WAITING_FOR_READY);
+
+   // Now that we know the side, set the volume from the config.
+   m_volume = Left() ? Config::LeftVolume() : Config::RightVolume();
+
    m_char.audio_control.Write({Control::START, G722_16KHZ, 0, (uint8_t)m_volume, (uint8_t)otherstate}, [](bool){});
    return true;
 }
@@ -649,10 +681,14 @@ void Side::OnHAPropChanged(const std::vector<uint8_t>& data)
 void Side::OnBattery(uint8_t percent)
 {
    g_info("%s Battery %hhu%%", Left() ? "Left" : "Right", percent);
+   m_battery = percent;
+   Updated();
 }
 
 
-void Side::OnExternalVolume(uint8_t value)
+void Side::OnMicrophoneVolume(uint8_t value)
 {
-   g_info("%s External Volume %hhu", Left() ? "Left" : "Right", value);
+   g_info("%s Microphone Volume %hhu", Left() ? "Left" : "Right", value);
+   m_microphone_volume = value;
+   Updated();
 }

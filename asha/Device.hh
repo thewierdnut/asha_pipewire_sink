@@ -45,6 +45,9 @@ public:
    enum AudioState{STOPPED, STREAM_INIT, STREAMING };
    AudioState State() const { return m_state; }
 
+   Side* Left();
+   Side* Right();
+
 protected:
    // State management callbacks
    void OnStarted(const std::weak_ptr<Side>& side, bool success);

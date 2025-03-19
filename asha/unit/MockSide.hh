@@ -13,7 +13,7 @@ public:
    using Side::OnStatusNotify;
 
    virtual void SetStreamVolume(int8_t volume) {}
-   virtual void SetExternalVolume(uint8_t volume) {}
+   virtual void SetMicrophoneVolume(uint8_t volume) {}
    
    virtual bool Start(bool otherstate, std::function<void(bool)> OnDone)
    {

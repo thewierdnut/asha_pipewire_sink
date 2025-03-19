@@ -54,8 +54,8 @@ public:
    bool Left() const { return !Right(); }
    void SubscribeExtra(/* callbacks? */);
 
-   virtual void SetStreamVolume(int8_t volume);
-   virtual void SetExternalVolume(uint8_t volume);
+   virtual void SetStreamVolume(int8_t volume);       /// -128 to 0
+   virtual void SetMicrophoneVolume(uint8_t volume);  /// 0 to 100
    // Start playback. The callback is called once the device is ready to receive.
    virtual bool Start(bool otherstate, std::function<void(bool)> OnDone);
    virtual bool Stop(std::function<void(bool)> OnDone);
@@ -82,6 +82,13 @@ public:
 
    void SetOnConnectionReady(std::function<void()> ready);
 
+   int8_t StreamVolume() const { return m_volume; }
+   uint8_t MicrophoneVolume() const { return m_microphone_volume; }
+   uint8_t Battery() const { return m_battery; }
+
+   void SetUpdateCallback(std::function<void()> fn) const { m_updated = fn; }
+
+
 protected:
    // Used by unit test mock.
    Side(const std::string& name): m_name(name), m_alias(name) {}
@@ -101,7 +108,9 @@ protected:
    void OnStatusNotify(const std::vector<uint8_t>& data);
    void OnHAPropChanged(const std::vector<uint8_t>& data);
    void OnBattery(uint8_t percent);
-   void OnExternalVolume(uint8_t value);
+   void OnMicrophoneVolume(uint8_t value);
+
+   void Updated() { if (m_updated) m_updated(); }
 
 private:
    Side() {}
@@ -160,6 +169,10 @@ private:
    uint16_t m_latency = 10;
    uint16_t m_timeout = 100;
    uint16_t m_celen = 12;
+
+   mutable std::function<void()> m_updated;
+   uint8_t m_battery = 0;
+   uint8_t m_microphone_volume = 0;
 };
 
 }

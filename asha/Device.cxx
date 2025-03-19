@@ -130,7 +130,7 @@ void Device::SetExternalVolume(bool left, int8_t v)
    for (auto& kv: m_sides)
    {
       if (left == kv.second->Left())
-         kv.second->SetExternalVolume(v);
+         kv.second->SetMicrophoneVolume(v);
    }
 }
 
@@ -240,6 +240,32 @@ bool Device::RemoveSide(const std::string& path)
    }
 
    return true;
+}
+
+
+Side* Device::Left()
+{
+   for (auto& s: m_sides)
+   {
+      if (s.second->Left())
+      {
+         return s.second.get();
+      }
+   }
+   return nullptr;
+}
+
+
+Side* Device::Right()
+{
+   for (auto& s: m_sides)
+   {
+      if (s.second->Right())
+      {
+         return s.second.get();
+      }
+   }
+   return nullptr;
 }
 
 

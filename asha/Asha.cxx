@@ -110,6 +110,14 @@ size_t Asha::Silence() const
 
 
 
+const Device* Asha::GetDevice(uint64_t id) const
+{
+   auto it = m_devices.find(id);
+   return it == m_devices.end() ? nullptr : it->second.device.get();
+}
+
+
+
 void Asha::OnAddDevice(const Bluetooth::BluezDevice& d)
 {
    // Called when we get a new device.
@@ -151,7 +159,14 @@ void Asha::OnRemoveDevice(const std::string& path)
             // device. This will also remove it from the set of available
             // pipewire sinks.
             g_info("Removing Sink %lu %s", it->first, it->second.device->Name().c_str());
+            if (m_device_removed)
+               m_device_removed(it->first);
             m_devices.erase(it);
+         }
+         else
+         {
+            if (m_device_updated)
+               m_device_updated(it->first, *it->second.device);
          }
          break;
       }
@@ -188,9 +203,11 @@ void Asha::SideReady(const std::string& path, const std::shared_ptr<Side>& side)
    g_info("    Codecs:    %s", (props.codecs & 0x02 ? "G.722" : "" ));
    
    // Insert, or find the existing one.
+   bool added = false;
    auto it = m_devices.find(props.hi_sync_id);
    if (it == m_devices.end())
    {
+      added = true;
       auto device = std::make_shared<Device>(side->Name());
       auto buffer = Buffer::Create([device](const RawS16& samples) {
           return device->SendAudio(samples);
@@ -217,4 +234,15 @@ void Asha::SideReady(const std::string& path, const std::shared_ptr<Side>& side)
    }
 
    it->second.device->AddSide(path, side);
+
+   if (added)
+   {
+      if (m_device_added)
+         m_device_added(it->first, *it->second.device);
+   }
+   else
+   {
+      if (m_device_updated)
+         m_device_updated(it->first, *it->second.device);
+   }
 }

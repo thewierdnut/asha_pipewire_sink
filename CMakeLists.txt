@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.9)
 project(asha_play)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 
 if (ENABLE_ASAN)
    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
@@ -18,6 +18,7 @@ pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3 libspa-0.2)
 
 
 add_subdirectory(asha/unit/)
+add_subdirectory(gui)
 
 add_executable(asha_connection_test
    asha/Bluetooth.cxx
