@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <vector>
+#include <cstdint>
 
 struct _GDBusConnection;
 struct _GDBusMethodInvocation;
