@@ -301,9 +301,9 @@ void Config::ParseConfigItem(const std::string& key, const std::string& value)
    else if (key == "right_volume")
       s_right_volume = ReadInt(-128, 0);
    else if (key == "left_microphone")
-      s_left_microphone = ReadInt(-128, 0);
+      s_left_microphone = ReadInt(0, 255);
    else if (key == "right_microphone")
-      s_right_microphone = ReadInt(-128, 0);
+      s_right_microphone = ReadInt(0, 255);
    else if (key == "interval")
       s_interval = ReadInt(6, 16);
    else if (key == "timeout")

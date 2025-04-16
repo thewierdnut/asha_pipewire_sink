@@ -12,43 +12,53 @@ uint32_t NowTicks()
 
 DeviceWidget::DeviceWidget()
 {
+   int row = 0;
    m_name_label.set_label("Name:");
    m_name_label.set_justify(Gtk::Justification::RIGHT);
-   int row = 0;
+   m_name_label.set_halign(Gtk::Align::END);
    attach(m_name_label, 0, row);
-   m_name.set_label("Insert Name here");
+   m_name.set_label("");
+   m_name.set_hexpand();
    attach(m_name, 1, row);
    ++row;
 
    m_battery_label.set_label("Battery:");
    m_battery_label.set_justify(Gtk::Justification::RIGHT);
+   m_battery_label.set_halign(Gtk::Align::END);
    attach(m_battery_label, 0, row);
+   m_battery.set_hexpand();
    attach(m_battery, 1, row);
    ++row;
 
    m_rssi_label.set_label("Rssi:");
    m_rssi_label.set_justify(Gtk::Justification::RIGHT);
+   m_rssi_label.set_halign(Gtk::Align::END);
    attach(m_rssi_label, 0, row);
+   m_rssi.set_hexpand();
    attach(m_rssi, 1, row);
    ++row;
 
    m_volume_label.set_label("Volume:");
    m_volume_label.set_justify(Gtk::Justification::RIGHT);
+   m_volume_label.set_halign(Gtk::Align::END);
    attach(m_volume_label, 0, row);
    m_volume.set_orientation(Gtk::Orientation::HORIZONTAL);
    m_volume.set_range(-128, 0);
    m_volume.property_round_digits().set_value(0);
    m_volume.signal_value_changed().connect(sigc::mem_fun(*this, &DeviceWidget::OnStreamVolumeChanged), true);
+   m_volume.set_hexpand();
    attach(m_volume, 1, row);
    ++row;
 
    m_microphone_label.set_label("Microphone:");
    m_microphone_label.set_justify(Gtk::Justification::RIGHT);
+   m_microphone_label.set_halign(Gtk::Align::END);
    attach(m_microphone_label, 0, row);
    m_microphone.set_orientation(Gtk::Orientation::HORIZONTAL);
    m_microphone.set_range(0, 255);
    m_microphone.property_round_digits().set_value(0);
-   m_microphone.signal_value_changed().connect(sigc::mem_fun(*this, &DeviceWidget::OnMicrophoneVolumeChanged), true);   
+   m_microphone.signal_value_changed().connect(sigc::mem_fun(*this, &DeviceWidget::OnMicrophoneVolumeChanged), true);
+   m_microphone.set_hexpand();
    attach(m_microphone, 1, row);
    ++row;
 
