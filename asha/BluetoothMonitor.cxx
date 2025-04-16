@@ -257,7 +257,6 @@ void BluetoothMonitor::Path::Register()
          if (e)
          {
             g_warning("Error calling RegisterMonitor: %s", e->message);
-            throw std::runtime_error("Unable to register bluez monitor path");
             g_error_free(e);
          }
 
