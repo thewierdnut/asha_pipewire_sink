@@ -18,6 +18,7 @@ public:
    static void ReadArgs(int argc, char** argv);
    static void HelpAndExit(const std::string& error);
    static void AddExtraStringOption(const std::string& name, const std::string& description);
+   static void AddExtraFlagOption(const std::string& name, const std::string& description);
    static void SetHelpDescription(const std::string& s) { s_description = s; }
 
    enum BufferAlgorithmEnum { NONE, THREADED, POLL4, POLL8, TIMED, BUFFER_ALGORITHM_ENUM_SIZE };
@@ -30,8 +31,11 @@ public:
    static bool Phy1m() { return s_phy1m; }
    static bool Phy2m() { return s_phy2m; }
    static bool Reconnect() { return s_reconnect; }
+   static int16_t RssiPaired() { return s_rssi_paired; }
+   static int16_t RssiUnpaired() { return s_rssi_unpaired; }
 
    static const std::string& Extra(const std::string& s);
+   static bool ExtraBool(const std::string& s);
 
    static bool Modified() { return s_modified; }
 
@@ -39,6 +43,8 @@ public:
    static bool SetConfigItem(const std::string& key, const BufferAlgorithmEnum& value);
    static bool SetConfigItem(const std::string& key, int8_t value) { return SetConfigItem(key, std::to_string((int)value));}
    static bool SetConfigItem(const std::string& key, uint8_t value) { return SetConfigItem(key, std::to_string((unsigned)value));}
+   static bool SetConfigItem(const std::string& key, int16_t value) { return SetConfigItem(key, std::to_string((int)value));}
+   static bool SetConfigItem(const std::string& key, uint16_t value) { return SetConfigItem(key, std::to_string((unsigned)value));}
    static bool SetConfigItem(const std::string& key, bool value);
 
 private:
@@ -56,6 +62,8 @@ private:
    static bool s_phy1m;
    static bool s_phy2m;
    static bool s_reconnect;
+   static int16_t s_rssi_paired;
+   static int16_t s_rssi_unpaired;
 
    static bool s_modified; // Whether or not the configuration was modified by the user.
 
@@ -64,6 +72,7 @@ private:
    {
       const std::string description;
       std::string value;
+      bool is_flag = false;
    };
    static std::map<std::string, ExtraOption> s_extra;
 

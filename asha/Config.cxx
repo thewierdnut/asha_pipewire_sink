@@ -21,6 +21,8 @@ bool Config::s_phy1m = false;
 bool Config::s_phy2m = false;
 bool Config::s_reconnect = false;
 bool Config::s_modified = false;
+int16_t Config::s_rssi_paired = 0;
+int16_t Config::s_rssi_unpaired = 0;
 
 // Managing extra options (mostly for stream_test)
 std::string Config::s_description = "Implementation of ASHA streaming protocol for pipewire.";
@@ -80,6 +82,8 @@ void Config::Write(std::ostream& out)
       out << "phy1m\n";
    if (s_reconnect)
       out << "reconnect\n";
+   out << "rssi_paired " << s_rssi_paired << '\n';
+   out << "rssi_unpaired " << s_rssi_unpaired << '\n';
    for (auto& kv: s_extra)
       out << kv.first << " " << kv.second.value << '\n';
 }
@@ -136,13 +140,21 @@ void Config::HelpAndExit(const std::string& error)
              << "  --buffer_algorithm   One of (none, threaded, poll4, poll8, timed)\n"
              << "                       [Default: threaded]\n"
              << "  --volume             Stream volume from -128 to 0 [Default: -64]\n"
-             << "  --reconnect          Enable the auto-reconnection mechanism. This uses the\n"
-             << "                       bluez gatt profile registration to auto-reconnect, which\n"
-             << "                       may require a bluetoothd restart to disable.\n";
+             // This doesn't work right.
+             // << "  --reconnect          Enable the auto-reconnection mechanism. This uses the\n"
+             // << "                       bluez gatt profile registration to auto-reconnect, which\n"
+             // << "                       may require a bluetoothd restart to disable.\n"
+             << "  --rssi_paired        Minimum rssi from (-127 to -1, 0 to disable) which will\n"
+             << "                       trigger a reconnection for a previously paired asha\n"
+             << "                       device. A value around -80 should work for normal use.\n"
+             << "  --rssi_unpaired      Minimum rssi from (-127 to -1, 0 to disable) which will\n"
+             << "                       trigger pairing and connection for a previously unseen\n"
+             << "                       device. A value around -50 would indicate close proximity\n"
+             << "                       to the transmitter.\n";
    auto oldflags = std::cout.flags();
    for (auto& extra: s_extra)
    {
-      std::cout << "  " << std::setw(20) << std::left << extra.first
+      std::cout << "  " << std::setw(20) << std::left << "--" + extra.first
                 << " " << extra.second.description << '\n';
    }
    std::cout.flags(oldflags);
@@ -180,12 +192,23 @@ void Config::AddExtraStringOption(const std::string& name, const std::string& de
    s_extra.emplace(name, ExtraOption{description});
 }
 
+void Config::AddExtraFlagOption(const std::string& name, const std::string& description)
+{
+   s_extra.emplace(name, ExtraOption{description, "", true});
+}
 
 const std::string& Config::Extra(const std::string& s)
 {
    static std::string EMPTY;
    auto it = s_extra.find(s);
    return it == s_extra.end() ? EMPTY : it->second.value;
+}
+
+bool Config::ExtraBool(const std::string& s)
+{
+   static std::string EMPTY;
+   auto it = s_extra.find(s);
+   return it == s_extra.end() ? false: it->second.value == "true";
 }
 
 bool Config::SetConfigItem(const std::string& key, const std::string& value)
@@ -293,9 +316,20 @@ void Config::ParseConfigItem(const std::string& key, const std::string& value)
       s_phy1m = ReadBool();
    else if (key == "reconnect")
       s_reconnect = ReadBool();
+   else if (key == "rssi_paired")
+      s_rssi_paired = ReadInt(-127, 0);
+   else if (key == "rssi_unpaired")
+      s_rssi_unpaired = ReadInt(-127, 0);
    else if (s_extra.count(key))
    {
       auto& extra = s_extra[key];
-      extra.value = ReadString();
+      if (extra.is_flag)
+         extra.value = value != "false" ? "true" : "false"; // so that an absence of a value is interpreted as "true"
+      else
+         extra.value = ReadString();
+   }
+   else
+   {
+      throw std::runtime_error("Unknown key " + key);
    }
 }

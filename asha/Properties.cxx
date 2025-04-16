@@ -10,6 +10,23 @@ namespace
 }
 
 
+Properties& Properties::operator=(Properties&& p)
+{
+   m_interface = std::move(p.m_interface);
+   m_path = std::move(p.m_path);
+   m_prop = std::move(p.m_prop);
+   return *this;
+}
+
+
+Properties& Properties::operator=(const Properties& p)
+{
+   m_interface = p.m_interface;
+   m_path = p.m_path;
+   return *this;
+}
+
+
 Properties::~Properties()
 {
    // Stub, to make sure destructor compiles here.
@@ -19,7 +36,7 @@ Properties::~Properties()
 void Properties::EnsureConnected()
 {
    if (m_prop) return;
-
+   // g_debug("Creating proxy for %s for path %s", PROPERTY_INTERFACE, m_path.c_str());
    GError* err = nullptr;
    m_prop.reset(g_dbus_proxy_new_for_bus_sync(
       G_BUS_TYPE_SYSTEM,
@@ -46,7 +63,7 @@ std::shared_ptr<GVariant> Properties::Get(const std::string& s)
 {
    EnsureConnected();
 
-   GVariant* args = g_variant_new("(ss)", PROPERTY_INTERFACE, s.c_str());
+   GVariant* args = g_variant_new("(ss)", m_interface.c_str(), s.c_str());
 
    GError* e = nullptr;
    GVariant* result = g_dbus_proxy_call_sync(m_prop.get(),
@@ -95,20 +112,33 @@ void Properties::Subscribe(UpdatedCallback cb)
             GVariantIter* it_changed_properties{};
             GVariantIter* it_invalidated_properties{};
 
-            g_variant_get(parameters, "(sa{sv}as)", nullptr, &it_changed_properties, it_invalidated_properties);
-
+            gchar* iface_name = nullptr;
+            g_variant_get(parameters, "(sa{sv}as)", &iface_name, &it_changed_properties, &it_invalidated_properties);
+            bool correct_interface = false;
+            if (iface_name)
+            {
+               correct_interface = iface_name == self->m_interface;
+               g_free(iface_name);
+            }
+            
             gchar* key{};
             GVariant* value{};
             if (it_changed_properties)
             {
-               while (g_variant_iter_loop(it_changed_properties, "{&sv}", &key, &value))
-                  self->m_cb(key, std::shared_ptr<GVariant>(g_variant_ref(value), g_variant_unref));
+               if (correct_interface)
+               {
+                  while (g_variant_iter_loop(it_changed_properties, "{&sv}", &key, &value))
+                     self->m_cb(key ? key : "", std::shared_ptr<GVariant>(g_variant_ref(value), g_variant_unref));
+               }
                g_variant_iter_free(it_changed_properties);
             }
             if (it_invalidated_properties)
             {
-               while (g_variant_iter_loop(it_invalidated_properties, "&s", &key))
-                  self->m_cb(key, nullptr);
+               if (correct_interface)
+               {
+                  while (g_variant_iter_loop(it_invalidated_properties, "&s", &key))
+                     self->m_cb(key ? key : "", nullptr);
+               }
                g_variant_iter_free(it_invalidated_properties);
             }
          }

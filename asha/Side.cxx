@@ -81,7 +81,12 @@ std::shared_ptr<Side> Side::CreateIfValid(const Bluetooth::BluezDevice& device)
          if (side)
          {
             if (value)
-               g_info("%s %s: %s", side->Description().c_str(), key.c_str(), GVariantDump(value.get()).c_str());
+            {
+               if (key == "RSSI")
+                  side->UpdateRssi(GVariantToInt16(value));
+               else
+                  g_info("%s %s: %s", side->Description().c_str(), key.c_str(), GVariantDump(value.get()).c_str());
+            }
             else
                g_info("%s invalidated %s", side->Description().c_str(), key.c_str());
          }

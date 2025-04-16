@@ -30,6 +30,9 @@ public:
    size_t FailedWrites() const;
    size_t Silence() const;
 
+   int16_t LeftRssi() const;
+   int16_t RightRssi() const;
+
    bool HasDevice() const { return !m_devices.empty(); }
 
    void SetDeviceAddedCallback(std::function<void(uint64_t, Device&)> fn) { m_device_added = fn; }

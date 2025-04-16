@@ -4,7 +4,6 @@
 #include "asha/Now.hh"
 #include "asha/Side.hh"
 #include "asha/Config.hh"
-#include "g722/g722_enc_dec.h"
 
 #include <poll.h>
 #include <bluetooth/bluetooth.h>
@@ -42,10 +41,10 @@ std::vector<uint8_t> ReadFile(const std::string& path)
    return ret;
 }
 
-class StreamTest
+class CapturePlay
 {
 public:
-   StreamTest(const std::string& left_path, const std::string& right_path):
+   CapturePlay(const std::string& left_path, const std::string& right_path):
       m_data_left{left_path.empty() ? std::vector<uint8_t>() : ReadFile(left_path)},
       m_data_right{right_path.empty() ? std::vector<uint8_t>() : ReadFile(right_path)},
       m_b(
@@ -57,7 +56,7 @@ public:
       
    }
 
-   ~StreamTest()
+   ~CapturePlay()
    {
       Stop();
    }
@@ -67,7 +66,7 @@ public:
       if (!m_running)
       {
          m_running = true;
-         m_thread = std::thread(&StreamTest::FeederThreadDeadline, this);
+         m_thread = std::thread(&CapturePlay::FeederThreadDeadline, this);
       }
 
       return true;
@@ -281,15 +280,15 @@ void HelpAndExit(const std::string& path)
 int main(int argc, char** argv)
 {
    asha::Config::SetHelpDescription("Utility to test streaming methods for raw g722 data.");
-   asha::Config::AddExtraStringOption("--left", "Raw S16LE File to feed to left or mono devices");
-   asha::Config::AddExtraStringOption("--right", "Raw S16LE File to feed to right devices");
+   asha::Config::AddExtraStringOption("left", "Raw S16LE File to feed to left or mono devices");
+   asha::Config::AddExtraStringOption("right", "Raw S16LE File to feed to right devices");
    asha::Config::ReadArgs(argc, argv);
 
    setenv("G_MESSAGES_DEBUG", "all", false);
    srand(time(nullptr));
 
-   std::string left_path = asha::Config::Extra("--left");
-   std::string right_path = asha::Config::Extra("--right");
+   std::string left_path = asha::Config::Extra("left");
+   std::string right_path = asha::Config::Extra("right");
 
    if (right_path.empty() && left_path.empty())
       asha::Config::HelpAndExit("Must specify --left or --right");
@@ -298,12 +297,12 @@ int main(int argc, char** argv)
    if (!left_path.empty() && !std::ifstream(left_path))
       asha::Config::HelpAndExit("Cannot read left file");
 
-   if (left_path.size() < 4 && left_path.substr(left_path.length() - 4) == "g722")
+   if (left_path.size() > 4 && left_path.substr(left_path.length() - 4) == "g722")
       asha::Config::HelpAndExit("--left file has a g722 extension. You need to pass a raw s16le file instead");
-   if (right_path.size() < 4 && right_path.substr(right_path.length() - 4) == "g722")
+   if (right_path.size() > 4 && right_path.substr(right_path.length() - 4) == "g722")
       asha::Config::HelpAndExit("--right file has a g722 extension. You need to pass a raw s16le file instead");
 
-   StreamTest c(left_path, right_path);
+   CapturePlay c(left_path, right_path);
    c.Start();
    
    std::shared_ptr<GMainLoop> loop(g_main_loop_new(nullptr, true), g_main_loop_unref);

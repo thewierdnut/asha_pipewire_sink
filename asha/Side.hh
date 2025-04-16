@@ -85,6 +85,7 @@ public:
    int8_t StreamVolume() const { return m_volume; }
    uint8_t MicrophoneVolume() const { return m_microphone_volume; }
    uint8_t Battery() const { return m_battery; }
+   int16_t Rssi() const { return m_rssi; }
 
    void SetUpdateCallback(std::function<void()> fn) const { m_updated = fn; }
 
@@ -111,6 +112,7 @@ protected:
    void OnMicrophoneVolume(uint8_t value);
 
    void Updated() { if (m_updated) m_updated(); }
+   void UpdateRssi(int16_t rssi) { m_rssi = rssi; Updated(); }
 
 private:
    Side() {}
@@ -173,6 +175,7 @@ private:
    mutable std::function<void()> m_updated;
    uint8_t m_battery = 0;
    uint8_t m_microphone_volume = 0;
+   int16_t m_rssi = 0;
 };
 
 }

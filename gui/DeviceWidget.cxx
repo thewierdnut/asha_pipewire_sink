@@ -26,6 +26,11 @@ DeviceWidget::DeviceWidget()
    attach(m_battery, 1, row);
    ++row;
 
+   m_rssi_label.set_label("Rssi:");
+   m_rssi_label.set_justify(Gtk::Justification::RIGHT);
+   attach(m_rssi_label, 0, row);
+   attach(m_rssi, 1, row);
+   ++row;
 
    m_volume_label.set_label("Volume:");
    m_volume_label.set_justify(Gtk::Justification::RIGHT);
@@ -64,6 +69,7 @@ void DeviceWidget::UpdateDevice(asha::Side* s)
    {
       m_name.set_label(s->Alias());
       m_battery.set_label(std::to_string(s->Battery()) + "%");
+      m_rssi.set_label(std::to_string(s->Rssi()) + " dB");
       m_volume.set_value(s->StreamVolume());
       m_microphone.set_value(s->MicrophoneVolume());
    }
@@ -71,6 +77,7 @@ void DeviceWidget::UpdateDevice(asha::Side* s)
    {
       m_name.set_label("");
       m_battery.set_label("");
+      m_rssi.set_label("");
       m_volume.set_value(-128);
       m_microphone.set_value(0);
    }
@@ -105,7 +112,6 @@ void DeviceWidget::PendingEvent::Post(std::function<void()> fn)
    if (now - m_previous > DELAY)
    {
       // Its been a long time since the previous post. Just post it now.
-      g_info("Emmitting immediately at %u", now);
       fn();
       m_previous = now;
    }
@@ -116,12 +122,7 @@ void DeviceWidget::PendingEvent::Post(std::function<void()> fn)
       {
          // Schedule a call in the future
          m_pending = true;
-         g_info("Scheduling in %u ms", DELAY - (now - m_previous));
          Glib::signal_timeout().connect_once(sigc::mem_fun(*this, &DeviceWidget::PendingEvent::Emit), DELAY - (now - m_previous));
-      }
-      else
-      {
-         g_info("Already scheduled...");
       }
       // else a call to Emit() is already scheduled. Just wait.
    }

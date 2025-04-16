@@ -10,7 +10,7 @@
 
 using namespace asha;
 
-// Create a the appropriate derived class based on the user config.
+// Create the appropriate derived class based on the user config.
 std::shared_ptr<Buffer> Buffer::Create(std::function<bool(const RawS16&)> cb)
 {
    switch (Config::BufferAlgorithm())

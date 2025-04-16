@@ -108,6 +108,34 @@ size_t Asha::Silence() const
    return ret;
 }
 
+int16_t Asha::LeftRssi() const
+{
+   for (auto& kv: m_devices)
+   {
+      if (kv.second.device)
+      {
+         auto side = kv.second.device->Left();
+         if (side)
+            return side->Rssi();
+      }
+   }
+   return 0;
+}
+
+int16_t Asha::RightRssi() const
+{
+   for (auto& kv: m_devices)
+   {
+      if (kv.second.device)
+      {
+         auto side = kv.second.device->Right();
+         if (side)
+            return side->Rssi();
+      }
+   }
+   return 0;
+}
+
 
 
 const Device* Asha::GetDevice(uint64_t id) const

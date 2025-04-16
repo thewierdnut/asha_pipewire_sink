@@ -29,6 +29,9 @@ private:
    Gtk::Label m_battery_label;
    Gtk::Label m_battery;
 
+   Gtk::Label m_rssi_label;
+   Gtk::Label m_rssi;
+
    Gtk::Label m_volume_label;
    Gtk::Scale m_volume;
 

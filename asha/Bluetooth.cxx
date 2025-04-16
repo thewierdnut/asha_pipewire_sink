@@ -172,7 +172,7 @@ void Bluetooth::ProcessDevice(const std::string& path, GVariantIter* property_di
    while (g_variant_iter_loop(property_dict, "{sv}", &key, &value))
       ProcessDeviceProperty(device, key, value);
 
-   auto& properties = m_bluez_properties[path] = Properties(path);
+   auto& properties = m_bluez_properties[path] = Properties(BLUEZ_DEVICE, path);
    std::string path_closure = path;
    properties.Subscribe([this, path_closure](const std::string& key, const std::shared_ptr<GVariant>& value){
       auto& device = m_devices[path_closure];
@@ -293,7 +293,7 @@ void Bluetooth::PrepareAndAddDevice(BluezDevice& device)
    assert(device.resolved);
 
    device.characteristics.clear();
-   device.properties = Properties(device.path);
+   device.properties = Properties(BLUEZ_DEVICE, device.path);
 
    // Fill out the device characteristics before we forward it to the callback.
    // TODO: Is there a more efficient way of doing this?

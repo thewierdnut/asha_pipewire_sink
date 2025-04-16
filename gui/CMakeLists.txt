@@ -16,6 +16,7 @@ else()
       ../asha/Buffer.cxx
       ../asha/BufferThreaded.cxx
       ../asha/BufferTimed.cxx
+      ../asha/BluetoothMonitor.cxx
       ../asha/Config.cxx
       ../asha/Characteristic.cxx
       ../asha/Device.cxx

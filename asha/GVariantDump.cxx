@@ -168,3 +168,33 @@ std::string GVariantDump(GVariant* v)
    GVariantDump(v, ss);
    return ss.str();
 }
+
+
+bool GVariantToBool(const std::shared_ptr<_GVariant>& v)
+{
+   const char* type = g_variant_get_type_string(v.get());
+   assert(type);
+
+   // Allow bool to be nested inside another variant
+   if (type[0] == G_VARIANT_CLASS_VARIANT)
+      return GVariantToBool(std::shared_ptr<_GVariant>(g_variant_get_variant(v.get()), g_variant_unref));
+   else if (type[0] == G_VARIANT_CLASS_BOOLEAN)
+      return g_variant_get_boolean(v.get());
+   else
+      throw std::runtime_error("Variant type is not a bool");
+}
+
+
+int16_t GVariantToInt16(const std::shared_ptr<_GVariant>& v)
+{
+   const char* type = g_variant_get_type_string(v.get());
+   assert(type);
+
+   // Allow bool to be nested inside another variant
+   if (type[0] == G_VARIANT_CLASS_VARIANT)
+      return GVariantToInt16(std::shared_ptr<_GVariant>(g_variant_get_variant(v.get()), g_variant_unref));
+   else if (type[0] == G_VARIANT_CLASS_INT16)
+      return g_variant_get_int16(v.get());
+   else
+      throw std::runtime_error("Variant type is not an int16");
+}
