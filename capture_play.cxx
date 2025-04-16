@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "asha/Bluetooth.hh"
+#include "asha/BluetoothMonitor.hh"
 #include "asha/Buffer.hh"
 #include "asha/Device.hh"
 #include "asha/Side.hh"
@@ -448,6 +449,8 @@ int main(int argc, char** argv)
    }, loop.get());
 
    CapturePlay cp;
+   asha::BluetoothMonitor bm;
+
    cp.Start();
 
    g_main_loop_run(loop.get());

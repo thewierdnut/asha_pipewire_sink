@@ -86,6 +86,7 @@ target_link_libraries(asha_pipewire_sink PkgConfig::GLIB PkgConfig::PIPEWIRE)
 if (ALSA_FOUND)
    add_executable(capture_play
       asha/Bluetooth.cxx
+      asha/BluetoothMonitor.cxx
       asha/Buffer.cxx
       asha/BufferThreaded.cxx
       asha/BufferTimed.cxx
