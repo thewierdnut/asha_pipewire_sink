@@ -113,7 +113,6 @@ add_executable(snoop_analyze snoop_analyze.cxx)
 
 add_executable(monitor_test
    asha/BluetoothMonitor.cxx
-   asha/Profile.cxx
    asha/GVariantDump.cxx
    asha/ObjectManager.cxx
    asha/Properties.cxx
