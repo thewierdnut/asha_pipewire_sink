@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include "Properties.hh"
 #include <memory>
 
