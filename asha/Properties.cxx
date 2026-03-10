@@ -77,7 +77,7 @@ std::shared_ptr<GVariant> Properties::Get(const std::string& s)
    if (e)
    {
       // TODO: knowing the severity of the error here depends on context
-      g_warning("Error calling retrieving property %s: %s", s.c_str(), e->message);
+      g_warning("Error retrieving property %s: %s", s.c_str(), e->message);
       g_error_free(e);
    }
    if (result)

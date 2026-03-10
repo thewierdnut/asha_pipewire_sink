@@ -27,13 +27,13 @@ Asha::Asha()
    {
       if (config.max_conn_interval != config.min_conn_interval)
       {
-         g_error("Your configured MinConnectionInterval (%hu) and MaxConnectionInterval (%hu) are not the same. "
+         g_info("Your configured MinConnectionInterval (%hu) and MaxConnectionInterval (%hu) are not the same. "
                  "You need to adjust your /etc/bluetooth/main.conf file and restart the bluetooth service.",
                  config.min_conn_interval, config.max_conn_interval);
       }
       else if (config.min_conn_interval > 16)
       {
-         g_error("Your configured MinConnectionInterval and MaxConnectionInterval are not set to 16. "
+         g_info("Your configured MinConnectionInterval and MaxConnectionInterval are not set to 16. "
                  "Please fix your /etc/bluetooth/main.conf and restart the bluetooth service.");
       }
       else if (config.min_conn_interval < 16)

@@ -354,6 +354,11 @@ protected:
             // -ESTRPIPE: stream is suspended
             // I'm not sure how to handle these... probably just need to close
             // and reopen the stream.
+            if (count == -EPIPE || count == -ESTRPIPE)
+            {
+               snd_pcm_recover(m_pcm.get(), count, true);
+               continue;
+            }
             g_warning("snd_pcm_readi returned %ld... exiting Feeder Thread", count);
             break;
          }
@@ -380,6 +385,11 @@ protected:
          }
 
          RawS16* next = buffer->NextBuffer();
+         if (!next)
+         {
+            // No room. Drop this frame.
+            continue;
+         }
 
          // TODO: better resampling method? For now, keeping it dead simple.
          if (m_sample_rate == 16000)

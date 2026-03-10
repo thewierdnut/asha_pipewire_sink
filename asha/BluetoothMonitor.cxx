@@ -711,7 +711,7 @@ void BluetoothMonitor::Monitor::DeviceFound(const std::string& path)
    // before accepting this device.
    Properties p(BLUEZ_DEVICE, path);
    auto uuids = p.Get("UUIDs");
-
+   // TODO: UUIDs  may not be populated unless we have paired.
    if (!uuids)
    {
       // TODO: This is broken somehow? the UUIDs should always exist for

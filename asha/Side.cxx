@@ -181,6 +181,13 @@ void Side::ReadProperties()
          //       a spa_latency_build() POD to indicate what latency the
          //       hearing devices expect.
       }
+      else
+      {
+         g_warning("Got invalid size for ReadOnlyProperties: %zu", data.size());
+         std::stringstream ss;
+         HexDump(ss, data.data(), data.size());
+         g_debug("%s", ss.str().c_str());
+      }
    });
 }
 
@@ -235,7 +242,7 @@ bool Side::Reconnect()
 {
    g_debug("Creating Connection");
 
-   assert(!m_sock);
+   m_sock.reset();
    int sock = socket(AF_BLUETOOTH, SOCK_SEQPACKET|SOCK_NONBLOCK, BTPROTO_L2CAP);
    struct sockaddr_l2 addr{};
    addr.l2_family = AF_BLUETOOTH;

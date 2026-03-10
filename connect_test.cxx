@@ -313,6 +313,28 @@ protected:
          g_info("    ConnectionSupervisionTimeout=100");
          g_info("You will need to restart bluez when you are done");
       }
+
+      RawHci hci;
+      RawHci::SystemConfig config;
+      // Rather than reading this config from the file, pull it out of the kernel,
+      // so that we know what is actually set.
+      if (hci.ReadSysConfig(config))
+      {
+         if (config.max_conn_interval > 16 ||
+             config.min_conn_interval > 16 ||
+             config.max_conn_interval != config.min_conn_interval)
+         {
+            g_info("The internal kernel settings for MinConnectionInterval and MaxConnectionInterval do not appear to be correct");
+            g_info("These values should both be set to 16, but instead they are:");
+            g_info("   MinConnectionInterval: %hu", config.min_conn_interval);
+            g_info("   MaxConnectionInterval: %hu", config.max_conn_interval);
+            g_info("This probably means you need to restart bluez");
+         }
+      }
+      else
+      {
+         g_info("Failed to read the system config from the kernel");
+      }
    }
 
 

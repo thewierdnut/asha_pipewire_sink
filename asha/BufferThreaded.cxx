@@ -29,6 +29,7 @@ void BufferThreaded::Start()
       m_startup = true;
       m_running = true;
       m_thread = std::thread(&BufferThreaded::DeliveryThread, this);
+      pthread_setname_np(m_thread.native_handle(), "buffer_encode");
    }
 }
 
@@ -67,8 +68,6 @@ void BufferThreaded::SendBuffer()
 
 void BufferThreaded::DeliveryThread()
 {
-   pthread_setname_np(m_thread.native_handle(), "buffer_encode");
-
    // Need to deliver a packet every 20 ms. Wake up every 5 ms and check for
    // one.
    static const struct timespec SLEEP_INTERVAL{0, 5000000};

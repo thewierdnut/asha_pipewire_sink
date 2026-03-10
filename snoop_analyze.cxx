@@ -1037,6 +1037,10 @@ protected:
 
    void ReadByTypeResponse(bool rx, uint16_t connection_handle, bool group, BtBufferStream b)
    {
+      // Don't process responses solicited by the peripheral to the central
+      if (!rx)
+         return;
+      
       uint8_t response_size = b.U8();
       size_t attribute_count = response_size == 0 ? 0 : b.Size() / response_size;
 
@@ -1377,7 +1381,6 @@ protected:
          uint16_t l2cap_length = b.U16();
          uint16_t cid = b.U16();
          assert(b.Size() == l2cap_length); // In case we screwed up the reassembly logic.
-
          switch (cid)
          {
          case 0x0004: // Attribute Protocol
@@ -1548,16 +1551,22 @@ int main(int argc, char** argv)
    uint64_t frame_idx = 0;
    uint64_t stamp = 0;
 
-   BtParser parser;
-   parser.NoteCallback = [](const std::string& s) {
-      std::cout << "System Note: " << s.c_str() << '\n';
+   auto Idx = [&]() {
+      std::stringstream ss;
+      ss << std::setw(8) << std::left << frame_idx;
+      return ss.str();
    };
-   parser.ConnectionCallback = [](uint16_t connection, uint8_t status, const std::string& mac, uint16_t interval, uint16_t latency, uint16_t timeout) {
-      std::cout << "New Connection: " << Hex(connection) << " " << mac << " params(" << interval << ", " << latency << ", " << timeout << ")\n";
+
+   BtParser parser;
+   parser.NoteCallback = [&](const std::string& s) {
+      std::cout << Idx() << " System Note: " << s.c_str() << '\n';
+   };
+   parser.ConnectionCallback = [&](uint16_t connection, uint8_t status, const std::string& mac, uint16_t interval, uint16_t latency, uint16_t timeout) {
+      std::cout << Idx() << " New Connection: " << Hex(connection) << " " << mac << " params(" << interval << ", " << latency << ", " << timeout << ")\n";
    };
    parser.Disconnect = [&](uint16_t connection, uint8_t status, const std::string& mac, uint8_t reason)
    {
-      std::cout << "Disconnect:     " << Hex(connection) << " " << mac << " " << Hex(reason) << '\n';
+      std::cout << Idx() << " Disconnect:     " << Hex(connection) << " " << mac << " " << Hex(reason) << '\n';
       for (auto it = asha_streams.begin(); it != asha_streams.end();)
       {
          if (it->first.first == connection)
@@ -1567,18 +1576,18 @@ int main(int argc, char** argv)
       }
       device_info.erase(connection);
    };
-   parser.DleChange = [](uint16_t connection, uint16_t tx_dlen, uint16_t tx_time, uint16_t rx_dlen, uint16_t rx_time) {
-      std::cout << "Dle Change:     " << Hex(connection) << " tx: " << tx_dlen << " " << tx_time << "μs   rx: " << rx_dlen << " " << rx_time << "μs\n";
+   parser.DleChange = [&](uint16_t connection, uint16_t tx_dlen, uint16_t tx_time, uint16_t rx_dlen, uint16_t rx_time) {
+      std::cout << Idx() << " Dle Change:     " << Hex(connection) << " tx: " << tx_dlen << " " << tx_time << "μs   rx: " << rx_dlen << " " << rx_time << "μs\n";
    };
-   parser.RemoteFeatures = [](uint16_t connection, uint64_t features) {
-      std::cout << "Supported:      " << Hex(connection) << " DLE: " << (features & FEATURE_DLE ? "true": "false")
+   parser.RemoteFeatures = [&](uint16_t connection, uint64_t features) {
+      std::cout << Idx() << " Supported:      " << Hex(connection) << " DLE: " << (features & FEATURE_DLE ? "true": "false")
                                                      << " 2MPHY: " << (features & FEATURE_2MPHY ? "true": "false")
                                                      << '\n';
    };
-   parser.Service = [](uint16_t connection, uint16_t handle, uint16_t end_handle, const std::string& uuid) {
-      std::cout << "Service:        " << Hex(connection) << " " << Hex(handle) << " " << Hex(end_handle) << " " << uuid << '\n';
+   parser.Service = [&](uint16_t connection, uint16_t handle, uint16_t end_handle, const std::string& uuid) {
+      std::cout << Idx() << " Service:        " << Hex(connection) << " " << Hex(handle) << " " << Hex(end_handle) << " " << uuid << '\n';
    };
-   parser.Characteristic = [](uint16_t connection, uint16_t handle, uint16_t value, uint8_t props, const std::string& uuid) {
+   parser.Characteristic = [&](uint16_t connection, uint16_t handle, uint16_t value, uint8_t props, const std::string& uuid) {
       // std::string props;
       // if (properties & 0x01) props += "Broadcast ";
       // if (properties & 0x02) props += "Read ";
@@ -1589,17 +1598,17 @@ int main(int argc, char** argv)
       // if (properties & 0x40) props += "AuthWrite ";
       // if (properties & 0x80) props += "Extended ";
       // if (!props.empty()) props.pop_back();
-      std::cout << "Characteristic: " << Hex(connection) << " " << Hex(handle) << " " << Hex(value) << " " << Hex(props) << " " << uuid << '\n';
+      std::cout << Idx() << " Characteristic: " << Hex(connection) << " " << Hex(handle) << " " << Hex(value) << " " << Hex(props) << " " << uuid << '\n';
    };
-   parser.Descriptor = [](uint16_t connection, uint16_t char_handle, uint16_t desc_handle, const std::string& uuid) {
-      std::cout << "Descriptor:     " << Hex(connection) << " " << Hex(char_handle) << " " << Hex(desc_handle) << " " << uuid << '\n';
+   parser.Descriptor = [&](uint16_t connection, uint16_t char_handle, uint16_t desc_handle, const std::string& uuid) {
+      std::cout << Idx() << "Descriptor:     " << Hex(connection) << " " << Hex(char_handle) << " " << Hex(desc_handle) << " " << uuid << '\n';
    };
    parser.Write = [&](uint16_t connection, uint16_t handle, const std::vector<uint8_t>& bytes) {
-      std::cout << "Write:          " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << ToString(bytes) << '\n';
+      std::cout << Idx() << " Write:          " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << ToString(bytes) << '\n';
    };
    std::map<uint16_t, bool> next_read_is_psm;
    parser.Read = [&](uint16_t connection, uint16_t handle, const std::vector<uint8_t>& bytes) {
-      std::cout << "Read:           " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << ToString(bytes) << '\n';
+      std::cout << Idx() << " Read:           " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << ToString(bytes) << '\n';
       auto info = parser.FindHandle(connection, handle);
       if (!info.characteristic)
       {
@@ -1673,7 +1682,7 @@ int main(int argc, char** argv)
       }
    };
    parser.Notify = [&](uint16_t connection, uint16_t handle, const std::vector<uint8_t>& bytes) {
-      std::cout << "Notify:         " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << Hex(bytes);
+      std::cout << Idx() << " Notify:         " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << Hex(bytes);
       auto info = parser.FindHandle(connection, handle);
       if (info.characteristic)
       {
@@ -1690,12 +1699,13 @@ int main(int argc, char** argv)
       std::cout << '\n';
    };
    parser.FailedWrite = [&](uint16_t connection, uint16_t handle, uint8_t code) {
-      std::cout << "Failed Write:   " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << code << '\n';
+      std::cout << Idx() << " Failed Write:   " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << code << '\n';
    };
    parser.FailedRead = [&](uint16_t connection, uint16_t handle, uint8_t code) {
-      std::cout << "Failed Read:    " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << code << '\n';
+      std::cout << Idx() << " Failed Read:    " << Hex(connection) << " " << Hex(handle) << " " << parser.HandleDescription(connection, handle) << " " << code << '\n';
    };
    parser.NewCreditConnection = [&](uint16_t connection, uint16_t status, const L2CapCreditConnection& info) {
+      std::cout << Idx() << ' ';
       if (status)
          std::cout << "Failed CoC:     " << Hex(connection) << " PSM: " << Hex(info.psm) << " Status: " << status << '\n';
       else
@@ -1779,7 +1789,7 @@ int main(int argc, char** argv)
          }
 
          itinfo->second.credits = info.tx_credits;
-         std::cout << std::setw(8) << frame_idx << (rx ? " >> " : " << ") << Hex(connection);
+         std::cout << Idx() << (rx ? " >> " : " << ") << Hex(connection);
          if (itinfo->second.other)
          {
             if (itinfo->second.dinfo && itinfo->second.other->dinfo)
