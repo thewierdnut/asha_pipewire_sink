@@ -2,6 +2,7 @@
 
 #include "AudioPacket.hh"
 #include "Buffer.hh"
+#include "DeviceInterface.hh"
 
 #include <atomic>
 #include <cassert>
@@ -14,15 +15,37 @@ namespace asha
 class BufferNone: public Buffer
 {
 public:
-   BufferNone(DataCallback cb):Buffer(cb) {}
+   BufferNone(const std::shared_ptr<DeviceInterface>& d):Buffer(d) {}
    virtual ~BufferNone() override {}
 
    virtual RawS16* NextBuffer() override { return &m_buffer; }
    virtual void SendBuffer() override
    {
-      if (!m_data_cb(m_buffer))
-         ++m_failed_writes;
+      auto device = m_device.lock();
+      if (device)
+      {
+         if (!device->SendAudio(m_buffer))
+            ++m_failed_writes;
+      }
    }
+
+   virtual void StreamStart() override
+   {
+      auto device = m_device.lock();
+      if (device)
+      {
+         device->StreamStart();
+      }
+   };
+
+   virtual void StreamStop() override
+   {
+      auto device = m_device.lock();
+      if (device)
+      {
+         device->StreamStop();
+      }
+   };
 
 private:
    RawS16 m_buffer;

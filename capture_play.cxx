@@ -334,7 +334,7 @@ protected:
 
    void FeederThread()
    {
-      auto buffer = asha::Buffer::Create([this](const RawS16& s) { return m_device->SendAudio(s); });
+      auto buffer = asha::Buffer::Create(m_device);
 
       const size_t SAMPLE_COUNT = m_sample_rate * 20 / 1000;
       int16_t frames[SAMPLE_COUNT * 2];

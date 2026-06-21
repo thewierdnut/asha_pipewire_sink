@@ -1,11 +1,14 @@
 #include "BufferThreaded.hh"
 
 #include "AudioPacket.hh"
+#include "DeviceInterface.hh"
 
 #include <atomic>
 #include <cassert>
 #include <functional>
 #include <thread>
+
+#include <glib.h>
 
 using namespace asha;
 
@@ -21,11 +24,45 @@ namespace
    }
 }
 
+BufferThreaded::BufferThreaded(const std::shared_ptr<DeviceInterface>& d):
+   Buffer(d)
+{
+}
+
+BufferThreaded::~BufferThreaded()
+{
+   if (m_running)
+   {
+      Stop();
+      auto device = m_device.lock();
+      if (device)
+         device->StreamStop();
+   }
+}
+
+void BufferThreaded::StreamStart()
+{
+   if (!m_running)
+   {
+      auto device = m_device.lock();
+      if (device)
+      {
+         device->StreamStart();
+         Start();
+      }
+   }
+}
+
+void BufferThreaded::StreamStop()
+{
+   // Ignore. We only stop the stream when we quit.
+}
 
 void BufferThreaded::Start()
 {
    if (!m_thread.joinable())
    {
+      g_info("Starting asynchronous buffer thread");
       m_startup = true;
       m_running = true;
       m_thread = std::thread(&BufferThreaded::DeliveryThread, this);
@@ -38,6 +75,8 @@ void BufferThreaded::Stop()
 {
    if (m_thread.joinable())
    {
+      g_info("Stopping asynchronous buffer thread");
+
       m_running = false;
       m_thread.join();
    }
@@ -95,33 +134,42 @@ void BufferThreaded::DeliveryThread()
                   continue;
                m_startup = false;
                // Flush all available packets to start up.
-               for (; idx < write; ++idx)
+               auto device = m_device.lock();
+               if (device)
                {
-                  auto& buffer = m_buffer[idx & (RING_SIZE-1)];
-                  if (!m_data_cb(buffer))
+                  for (; idx < write; ++idx)
                   {
-                     ++m_failed_writes;
-                     if (write > idx + 1)
-                        __atomic_fetch_add(&m_buffer_full, 1, __ATOMIC_RELAXED);
-                     break;
+                     auto& buffer = m_buffer[idx & (RING_SIZE-1)];
+                     
+                     if (device->SendAudio(buffer))
+                     {
+                        ++m_failed_writes;
+                        if (write > idx + 1)
+                           __atomic_fetch_add(&m_buffer_full, 1, __ATOMIC_RELAXED);
+                        break;
+                     }
                   }
                }
                m_read = idx;
             }
             else
             {
-               auto& buffer = m_buffer[idx & (RING_SIZE-1)];
-               if (!m_data_cb(buffer))
+               auto device = m_device.lock();
+               if (device)
                {
-                  ++m_failed_writes;
-                  // If we failed to send a packet, drop an extra from input
-                  if (write > idx + 1)
+                  auto& buffer = m_buffer[idx & (RING_SIZE-1)];
+                  if (!device->SendAudio(buffer))
                   {
-                     ++m_read;
-                     __atomic_fetch_add(&m_buffer_full, 1, __ATOMIC_RELAXED);
+                     ++m_failed_writes;
+                     // If we failed to send a packet, drop an extra from input
+                     if (write > idx + 1)
+                     {
+                        ++m_read;
+                        __atomic_fetch_add(&m_buffer_full, 1, __ATOMIC_RELAXED);
+                     }
                   }
+                  ++m_read;
                }
-               ++m_read;
             }
          }
          else
@@ -136,9 +184,13 @@ void BufferThreaded::DeliveryThread()
             //       overtaken pipewire, and it may be better to just skip
             //       the packet to allow the hearing devices to drain their
             //       buffers and catch up.
-            if (!m_data_cb(SILENCE))
-               ++m_failed_writes;
-            ++m_silence;
+            auto device = m_device.lock();
+            if (device)
+            {
+               if (!device->SendAudio(SILENCE))
+                  ++m_failed_writes;
+               ++m_silence;
+            }
          }
          next += INTERVAL;
       }

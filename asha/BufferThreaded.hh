@@ -21,13 +21,15 @@ namespace asha
 class BufferThreaded: public Buffer
 {
 public:
-   BufferThreaded(DataCallback cb):Buffer(cb) { Start(); }
-   virtual ~BufferThreaded() override { Stop(); }
+   BufferThreaded(const std::shared_ptr<DeviceInterface>& d);
+   virtual ~BufferThreaded() override;
 
    void Start();
    void Stop();
    virtual RawS16* NextBuffer() override;
    virtual void SendBuffer() override;
+   virtual void StreamStart() override;
+   virtual void StreamStop() override;
 
 protected:
    void DeliveryThread();

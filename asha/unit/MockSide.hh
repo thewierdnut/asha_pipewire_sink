@@ -17,12 +17,12 @@ public:
    
    virtual bool Start(bool otherstate, std::function<void(bool)> OnDone)
    {
-      SetState(WAITING_FOR_READY);
+      SetState(WAITING_FOR_STREAM);
       return LogCall(START, otherstate, [this, OnDone](bool a) {
          // Normally, we would wait for bluez to respond when the status
          // characteristic sends a notification, but here, lets just set
          // it to ready.
-         SetState(a ? READY : STOPPED);
+         SetState(a ? STREAMING : STOPPED);
          OnDone(a);
       });
    }
@@ -42,9 +42,11 @@ public:
    virtual bool UpdateOtherConnected(bool connected) { return LogCall(OTHER, connected); }
    virtual bool UpdateConnectionParameters(uint8_t interval) { return LogCall(PARAM, interval); }
 
-   enum Call { START, STOP, OTHER, PARAM, CALL_COUNT };
+   enum Call { CONNECTING, START, STOP, OTHER, PARAM, CALL_COUNT };
    void Reset()
    {
+      // A side is not passed to the asha device until it is already connected
+      // and stopped.
       for (size_t i = START; i < CALL_COUNT; ++i)
          m_call[i] = CallInfo{};
       SetState(STOPPED);

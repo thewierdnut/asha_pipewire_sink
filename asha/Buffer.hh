@@ -6,6 +6,8 @@
 #include <functional>
 #include <memory>
 
+class DeviceInterface;
+
 namespace asha
 {
 
@@ -16,13 +18,14 @@ namespace asha
 class Buffer
 {
 public:
-   typedef std::function<bool(const RawS16&)> DataCallback;
    // Create a the appropriate derived class based on the user config.
-   static std::shared_ptr<Buffer> Create(DataCallback cb);
+   static std::shared_ptr<Buffer> Create(const std::shared_ptr<DeviceInterface>& d);
    virtual ~Buffer() { }
 
    virtual RawS16* NextBuffer() = 0;
    virtual void SendBuffer() = 0;
+   virtual void StreamStart() = 0;
+   virtual void StreamStop() = 0;
 
    size_t Occupancy() const { return m_occupancy; }
    size_t OccupancyHigh() const { return m_high_occupancy; }
@@ -31,9 +34,9 @@ public:
    size_t Silence() const { return m_silence; }
 
 protected:
-   Buffer(DataCallback cb):m_data_cb{cb} {}
+   Buffer(const std::shared_ptr<DeviceInterface>& d):m_device{d} {}
 
-   DataCallback m_data_cb;
+   std::weak_ptr<DeviceInterface> m_device;
 
    size_t m_failed_writes = 0;
    size_t m_occupancy = 0;

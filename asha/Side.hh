@@ -66,7 +66,13 @@ public:
    const std::string& Name() const { return m_name; }
    const std::string& Alias() const { return m_alias; }
    
-   enum SideState {INIT, STOPPED, WAITING_FOR_READY, READY, WAITING_FOR_STOP};
+   enum SideState {
+      INIT,    // Waiting for sides to establish CoC connection
+      STOPPED, // No audio streaming, but ready.
+      WAITING_FOR_STREAM, // Start issued, waiting for acknowledgement from all sides.
+      STREAMING,          // Currently streaming audio.
+      WAITING_FOR_STOP,   // Stop received and issued to sides. Transition to STOPPED next.
+   };
    SideState State() const { return m_state; }
 
    int Sock() const;

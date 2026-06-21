@@ -10,6 +10,8 @@
 #include <string>
 
 #include "AudioPacket.hh"
+#include "DeviceInterface.hh"
+
 #include "../g722/g722_enc_dec.h"
 
 namespace pw {
@@ -23,7 +25,7 @@ class Side;
 class Buffer;
 
 // Manage a pair of hearing devices.
-class Device: public std::enable_shared_from_this<Device>
+class Device: public DeviceInterface
 {
 public:
    Device(const std::string& name);
@@ -40,26 +42,49 @@ public:
    void SetExternalVolume(bool left, int8_t v);
 
    // These will be called by the pipewire stream. (pipewire thread)
-   bool SendAudio(const RawS16& samples);
+   bool SendAudio(const RawS16& samples) override;
 
-   enum AudioState{STOPPED, STREAM_INIT, STREAMING };
+   enum AudioState{UNINITIALIZED, STOPPED, START_STREAMING, STREAMING };
    AudioState State() const { return m_state; }
+   const char* StateStr() const
+   {
+      switch(m_state)
+      {
+      case UNINITIALIZED: return "UNINITIALIZED";
+      case STOPPED: return "STOPPED";
+      case START_STREAMING: return "START_STREAMING";
+      case STREAMING: return "STREAMING";
+      default: return "UNKNOWN";
+      }
+   }
 
    Side* Left();
    Side* Right();
+
+   // virtual void OnConnect();
+   // virtual void OnDisconnect();
+   void StreamStart() override;
+   void StreamStop() override;
 
 protected:
    // State management callbacks
    void OnStarted(const std::weak_ptr<Side>& side, bool success);
    void OnStop(const std::weak_ptr<Side>& side, bool success);
+   void OnRestart(const std::weak_ptr<Side>& side, bool success);
 
    void Start();
    void Stop();
 
    bool SidesAreAll(int state) const;
 
+   void StartCallback(const std::shared_ptr<Side>& s, bool status);
+
+   void StreamStartImpl();
+   void StreamStopImpl();
+   void ProcessDeferred();
+
 private:
-   AudioState m_state = STOPPED;
+   AudioState m_state = UNINITIALIZED;
    std::string m_name;
 
    g722_encode_state_t m_state_left{};
@@ -73,6 +98,9 @@ private:
    std::shared_ptr<pw::Stream> m_stream;
    uint8_t m_audio_seq = 0;
    int8_t m_volume = -60;
+
+
+   std::vector<std::function<void()>> m_deferred_state_changes;
 };
 
 

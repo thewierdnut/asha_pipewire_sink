@@ -15,11 +15,13 @@ namespace asha
 class BufferTimed: public Buffer
 {
 public:
-   BufferTimed(DataCallback cb):Buffer(cb) {}
+   BufferTimed(const std::shared_ptr<DeviceInterface>& d):Buffer(d) {}
    virtual ~BufferTimed() override {}
 
    virtual RawS16* NextBuffer() override { return &m_buffer; }
    virtual void SendBuffer() override;
+   virtual void StreamStart() override;
+   virtual void StreamStop() override;
 
 private:
    RawS16 m_buffer;

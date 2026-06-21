@@ -504,13 +504,13 @@ bool Side::Start(bool otherstate, std::function<void(bool)> OnDone)
       {
          t->m_ready_to_receive_audio = s == STATUS_OK;
          if (t->m_ready_to_receive_audio)
-            t->SetState(READY);
+            t->SetState(STREAMING);
          else
             t->SetState(STOPPED);
          OnDone(t->m_ready_to_receive_audio);
       }
    };
-   SetState(WAITING_FOR_READY);
+   SetState(WAITING_FOR_STREAM);
 
    // Now that we know the side, set the volume from the config.
    m_volume = Left() ? Config::LeftVolume() : Config::RightVolume();
@@ -521,7 +521,7 @@ bool Side::Start(bool otherstate, std::function<void(bool)> OnDone)
 
 bool Side::Stop(std::function<void(bool)> OnDone)
 {
-   assert(m_state == READY);
+   assert(m_state == STREAMING);
    const char* side = Left() ? "left " : "right";
    g_info("%s Sending ACP stop", side);
 

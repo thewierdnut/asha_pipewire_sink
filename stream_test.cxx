@@ -155,7 +155,7 @@ protected:
 
    void FeederThreadDeadline()
    {
-      auto buffer = asha::Buffer::Create([this](const RawS16& s) { return m_device->SendAudio(s); });
+      auto buffer = asha::Buffer::Create(m_device);
 
       size_t dropped = 0;
       size_t failed = 0;

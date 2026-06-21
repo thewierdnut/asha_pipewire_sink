@@ -237,15 +237,13 @@ void Asha::SideReady(const std::string& path, const std::shared_ptr<Side>& side)
    {
       added = true;
       auto device = std::make_shared<Device>(side->Name());
-      auto buffer = Buffer::Create([device](const RawS16& samples) {
-          return device->SendAudio(samples);
-      });
+      auto buffer = Buffer::Create(device);
       auto stream = std::make_shared<pw::Stream>(
          "asha_"+std::to_string(props.hi_sync_id), side->Name(),
-         []() { },
-         []() { },
-         []() { },
-         []() { },
+         [buffer]() { /* device->OnConnect(); */ }, // connect
+         [buffer]() { /* device->OnDisconnect(); */ }, // disconnect
+         [buffer]() { buffer->StreamStart(); }, // start
+         [buffer]() { buffer->StreamStop(); }, // stop
          [buffer](const RawS16& samples) {
             // TODO: redesign this api so that we can retrieve the pointer and
             //       have the pipewire stream fill it in.
