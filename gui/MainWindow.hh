@@ -34,5 +34,4 @@ private:
    DeviceWidget m_right;
 
    asha::Asha m_asha;
-   asha::BluetoothMonitor m_monitor;
 };

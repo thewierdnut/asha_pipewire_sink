@@ -99,5 +99,5 @@ void MainWindow::SetId(uint64_t id)
 
 void MainWindow::OnReconnectRssiChanged()
 {
-   m_monitor.SetRssiPaired(m_rssi_reconnect.get_value());
+   // m_monitor.SetRssiPaired(m_rssi_reconnect.get_value());
 }

@@ -31,7 +31,6 @@ int main(int argc, char** argv)
    guint quitter1 = g_unix_signal_add(SIGINT, Shutdown, loop.get());
    guint quitter2 = g_unix_signal_add(SIGTERM, Shutdown, loop.get());
    asha::Asha a;
-   asha::BluetoothMonitor bm;
 
    // Auto-reconnection logic can be "annoyingly persistent". Make it optional.
    std::unique_ptr<asha::GattProfile> profile;
