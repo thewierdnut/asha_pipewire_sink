@@ -1,4 +1,16 @@
 # ASHA (Audio Streaming for Hearing Aids) Pipewire Sink
+
+> [!WARNING]
+> **Project Status Update:** Native ASHA support is now available in Pipewire in an experimental state! 
+> 
+> Because of this situation change, this standalone project is now left mostly for diagnostic and informational purposes. Users are highly encouraged to use the native implementation. Any issues or feature requests regarding ASHA should now be reported directly upstream to Pipewire.
+>
+> **Upstream Pipewire Links:**
+> * [Pipewire ASHA Wiki / Setup Guide](https://gitlab.freedesktop.org/pipewire/pipewire/-/wikis/ASHA-Hearing-Aids)
+> * [Pipewire ASHA Work Items & Issues](https://gitlab.freedesktop.org/pipewire/pipewire/-/work_items?sort=created_date&state=opened&search=asha&first_page_size=20)
+
+## About This Project
+
 A sample ASHA implementation for Linux designed to work with pipewire and bluez.
 
 This project mostly follows the [Hearing Aid Audio Support Using Bluetooth LE](https://source.android.com/docs/core/connect/bluetooth/asha) document created by Google. Note that the specification varies in minor ways from the actual implementation used in the android source code.
