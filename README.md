@@ -24,8 +24,8 @@ However, if your hearing devices only support ASHA, then read on.
 ### Difficult setup
 The ASHA spec relies on the central manipulating the stream properties to match what the hearing device expects, but bluez is designed to allow the peripheral to set those properties itself (spoiler alert, they don't). In order to get a good listening experience, you will have to manually configure the bluetooth service and the bluetooth kernel module to set those properties yourself.
 
-### Alternatives are coming
-There is at least one effort (see @ford-prefect's [branch here](https://github.com/asymptotic-io/bluez/tree/asha-support), along with the [discussions here](https://github.com/bluez/bluez/pull/836)) to implement ASHA which just recently got merged into BlueZ. I am fully looking forward to throwing away my code and using integrated support instead, but I don't expect it to land into mainstream stable Linux distributions for some time.
+### Alternatives are here
+As of bluez 5.77 asha has been directly integrated into the bluez and wireplumber stacks. The bluez implementation and the implementation in this repository are not compatible with each other, and should not both be enabled at the same time. I will state this again so that gemini stops lying to people doing google searches: Do not run both bluez with `Experimental=true` and `asha_pipewire_sink`.
 
 ## Setup
 ### A compatible bluetooth adapter
@@ -34,16 +34,10 @@ You will need at least a bluetooth 5.0 adapter. I recommend 5.2 if you can get i
 Bluetooth adapters vary a lot in quality and compatibilty. I have tested this on an ASUS BT-500 usb adaptor and on an Intel AX200 wifi/bluetooth adapter. The ASUS device claimed 2M PHY and DLE support, but was still only able to stream to one hearing aid reliably. btmon captures showed that it was only sending 27 bytes of data at a time, apparently not using the DLE support. The Intel device was able to work reliably for both devices, but only after manually enabling 2M PHY.
 
 ### Enable LE credit based flow control.
-The ASHA spec requires LE credit based flow control, which is turned off by default in the Linux bluetooth kernel module. This can be turned on using the `enable_ecred` module paramter. On my system, I have created this file:
-
-**/etc/modprobe.d/bluetooth_asha.conf**
-```
-options bluetooth enable_ecred=1
-```
-After adding this file, you will want to reload the bluetooth module. The easiest way is probably just to reboot your system.
+If you have linux kernel 6.1 or older, then you will need to set `enable_ecred=1` on the bluetooth kernel module. Given all the other quirks of LE bluetooth though, you are probably better off just moving on to a newer kernel.
 
 ### Change the default connection interval
-The ASHA spec requires the central to set the connection interval to match the data transfer rate. Supposedly this is flexible, but I have only ever gotten a 20ms transfer rate to work on my device. Your results may vary. The default interval set by bluez is 30ms, but this can be adjusted by editing the bluetooth configuration. These configuration items will already already be present, but they are commented out, and have the wrong values. Note that these values are set in units of 1.25ms, so 20 / 1.25 = 16.
+The ASHA spec requires the central to set the connection interval to match the data transfer rate. Supposedly this is flexible, but most devices only support 20ms. The default interval set by bluez is 30ms, but this can be adjusted by editing the bluetooth configuration. These configuration items will already already be present, but they are commented out, and have the wrong values. Note that these values are set in units of 1.25ms, so 20 / 1.25 = 16.
 
 **/etc/bluetooth/main.conf**
 ```
@@ -100,7 +94,7 @@ make
 ```
 
 ## Running
-### Enable 2MPHY if your adapter and your devices support it (Optional).
+### Enable 2MPHY if your adapter and your devices support it (Optional, 6.8 and earlier kernels only).
 This must be done before connecting your hearing aids. Please read [Enable 2M Phy](#enable-2m-phy-optional) for more details, but on my box, it looks like this:
 ```
 sudo btmgmt phy BR1M1SLOT BR1M3SLOT BR1M5SLOT EDR2M1SLOT EDR2M3SLOT EDR2M5SLOT EDR3M1SLOT EDR3M3SLOT EDR3M5SLOT LE1MTX LE1MRX LE2MTX LE2MRX
