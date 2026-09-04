@@ -141,6 +141,13 @@ protected:
       CheckPHY(side);
 
       m_device->AddSide(path, side);
+      if (!m_stream_started)
+      {
+         // Le refactor start/stop attend un événement pipewire : on le simule
+         // dès la première aide, les suivantes passent par AddSide (restart).
+         m_stream_started = true;
+         m_device->StreamStart();
+      }
    }
    void OnRemoveDevice(const std::string& path)
    {
@@ -206,6 +213,7 @@ protected:
             pos += ASHA_PACKET_TIME;
          }
       }
+      buffer->StreamStop();
    }
 
    void CheckPHY(const std::shared_ptr<asha::Side>& device)
@@ -258,6 +266,7 @@ private:
    std::thread m_thread;
 
    std::shared_ptr<asha::Device> m_device;
+   bool m_stream_started = false;
    asha::Bluetooth m_b; // needs to be last
 };
 
