@@ -143,8 +143,9 @@ protected:
       m_device->AddSide(path, side);
       if (!m_stream_started)
       {
-         // Le refactor start/stop attend un événement pipewire : on le simule
-         // dès la première aide, les suivantes passent par AddSide (restart).
+         // The start/stop refactor expects a pipewire event: Simulate it.
+         // After the first hearing aid event, subsequent events go through
+         // AddSide (restart).
          m_stream_started = true;
          m_device->StreamStart();
       }
