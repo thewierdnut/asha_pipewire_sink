@@ -21,7 +21,7 @@ public:
    static void AddExtraFlagOption(const std::string& name, const std::string& description);
    static void SetHelpDescription(const std::string& s) { s_description = s; }
 
-   enum BufferAlgorithmEnum { NONE, THREADED, POLL4, POLL8, TIMED, BUFFER_ALGORITHM_ENUM_SIZE };
+   enum BufferAlgorithmEnum { NONE, THREADED, THREADED8, POLL4, POLL8, TIMED, BUFFER_ALGORITHM_ENUM_SIZE };
    static BufferAlgorithmEnum BufferAlgorithm() { return s_buffer_algorithm; }
    static uint16_t Interval() { return s_interval; }
    static uint16_t Timeout() { return s_timeout; }

@@ -23,7 +23,10 @@ std::shared_ptr<Buffer> Buffer::Create(const std::shared_ptr<DeviceInterface>& d
       return std::make_shared<BufferNone>(d);
    case Config::THREADED:
       g_info("Buffer algorithm: THREADED");
-      return std::make_shared<BufferThreaded>(d);
+      return std::make_shared<BufferThreaded<4>>(d);
+   case Config::THREADED8:
+      g_info("Buffer algorithm: THREADED8");
+      return std::make_shared<BufferThreaded<8>>(d);
    case Config::POLL4:
       g_info("Buffer algorithm: POLL4");
       return std::make_shared<BufferPoll<4>>(d);

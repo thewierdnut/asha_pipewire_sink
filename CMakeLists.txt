@@ -40,7 +40,6 @@ target_link_libraries(asha_connection_test PkgConfig::GLIB)
 add_executable(asha_stream_test
    asha/Bluetooth.cxx
    asha/Buffer.cxx
-   asha/BufferThreaded.cxx
    asha/BufferTimed.cxx
    asha/Characteristic.cxx
    asha/Config.cxx
@@ -62,7 +61,6 @@ add_executable(asha_pipewire_sink
    asha/Bluetooth.cxx
    asha/BluetoothMonitor.cxx
    asha/Buffer.cxx
-   asha/BufferThreaded.cxx
    asha/BufferTimed.cxx
    asha/Characteristic.cxx
    asha/Config.cxx
@@ -88,7 +86,6 @@ if (ALSA_FOUND)
       asha/Bluetooth.cxx
       asha/BluetoothMonitor.cxx
       asha/Buffer.cxx
-      asha/BufferThreaded.cxx
       asha/BufferTimed.cxx
       asha/Characteristic.cxx
       asha/Config.cxx

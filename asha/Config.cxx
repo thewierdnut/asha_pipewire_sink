@@ -28,7 +28,7 @@ int16_t Config::s_rssi_unpaired = 0;
 std::string Config::s_description = "Implementation of ASHA streaming protocol for pipewire.";
 std::map<std::string, Config::ExtraOption> Config::s_extra;
 
-static const char* BUFFER_ALGORITHM_ENUM_STR[] = {"none", "threaded", "poll4", "poll8", "timed"};
+static const char* BUFFER_ALGORITHM_ENUM_STR[] = {"none", "threaded", "threaded8", "poll4", "poll8", "timed"};
 static_assert(sizeof(BUFFER_ALGORITHM_ENUM_STR) / sizeof(*BUFFER_ALGORITHM_ENUM_STR) == Config::BufferAlgorithmEnum::BUFFER_ALGORITHM_ENUM_SIZE);
 
 
@@ -137,7 +137,7 @@ void Config::HelpAndExit(const std::string& error)
    std::cout << s_description << '\n'
              << "Usage: " << s_prog_name << " [options]\n"
              << "Options:\n"
-             << "  --buffer_algorithm   One of (none, threaded, poll4, poll8, timed)\n"
+             << "  --buffer_algorithm   One of (none, threaded, threaded8, poll4, poll8, timed)\n"
              << "                       [Default: threaded]\n"
              << "  --volume             Stream volume from -128 to 0 [Default: -64]\n"
              // This doesn't work right.
@@ -285,6 +285,8 @@ void Config::ParseConfigItem(const std::string& key, const std::string& value)
          s_buffer_algorithm = NONE;
       else if (value == "threaded")
          s_buffer_algorithm = THREADED;
+      else if (value == "threaded8")
+         s_buffer_algorithm = THREADED8;
       else if (value == "poll4")
          s_buffer_algorithm = POLL4;
       else if (value == "poll8")
